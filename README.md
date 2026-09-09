@@ -11,7 +11,9 @@ Der lokale Audioweg ist erprobt, eine vollständige Telefonbrücke ist noch nich
 - Anschließend wurde das MacBook-Mikrofon für einen lokalen Live-Test ergänzt. Der Nutzer bestätigte, dass seine Sprache verstanden wurde und er die Original-Voice-Antwort perfekt hörte. Dies ist eine qualitative Nutzerbestätigung, keine instrumentierte Duplex- oder Latenzmessung.
 - Echter Anruf, Anbieterwahl, automatische Voice-Steuerung, Kontextprüfung, Fehlerbehandlung und T3-Code-Integration sind offen.
 
-Dieses Repository enthält den eigenen Swift-Testsender/-empfänger, einen reproduzierbaren Tongenerator und bereinigte technische Dokumentation. Es enthält keinen Telefonie-Client oder Controller. Die Anbieter-Kostenrecherche läuft separat; vorläufige Kostenberichte wurden nicht übernommen.
+**Gewählter Telefonieweg: Telegram über einen regulären eigenen Benutzerclient.** Die WhatsApp-Business-App bleibt unverändert. Kein weiterer FaceTime-/Providervergleich ist Teil der Umsetzung.
+
+Das Repository enthält jetzt zusätzlich einen Telegram-Anrufsteuerungsadapter, eine Bindung an die offizielle TDLib-JSON-C-API, lokale Accountkonfiguration und einen ausdrücklich gestarteten Login-Pfad. TDLib 1.8.67 wurde nativ für arm64 gebaut und ohne Anmeldung geprüft. Die Steuerlogik besteht Offline-Tests. **Echte Telegram-Anrufe sind noch gesperrt:** Der offizielle tgcalls-Medienbuild benötigt zusätzliche passende WebRTC-Abhängigkeiten, Zielauflösung/Live-Eventloop fehlen noch. Die sichtbare Demo ist ausdrücklich eine Simulation. [Stand und Befehle](docs/telegram-control.md).
 
 ## Aufbau
 
@@ -34,6 +36,9 @@ Beim letzten lokalen Test war zusätzlich das physische MacBook-Mikrofon im Hinw
 - `Makefile`: Build und Prüfung ohne Audiozugriff.
 - `docs/evidence.md`: bereinigte historische Befunde und ihre Grenzen.
 - `docs/manual-test.md`: CLI-Modi und manuelle Testfolge.
+- `telegram_bridge/`: TDLib-Bindung, Audio-only-Call-Lifecycle, private lokale Konfiguration und expliziter Login.
+- `dependencies.json`: geprüfte offizielle TDLib-/tgcalls-Revisionen.
+- `docs/telegram-control.md`: native Buildbefunde, Offlinechecks und offene Live-/Medien-Gates.
 
 ## Lokaler Build und Prüfung
 
@@ -51,9 +56,9 @@ Die ursprüngliche Sprach-AIFF wird nicht übernommen. Der Generator erzeugt sta
 ## Nächste Gates
 
 1. In der richtigen Codex-Task Original-Voice manuell starten und Kontext mit einer vorher ausschließlich dort hinterlegten Information prüfen.
-2. Anbieter und Telefonie-Client auswählen; Zugang, Zielnummer und Kostenlimit lokal konfigurieren. Ein ausgehender Anruf vom Mac muss am Handy tatsächlich als eingehender Anruf klingeln.
+2. Getrenntes Telegram-Absenderkonto bewusst auswählen und eigene API-Daten lokal eingeben. Gepinntes tgcalls/WebRTC-Medienbackend bauen, Zielauflösung und Live-Eventloop verbinden. Ein ausgehender Telegram-Audioanruf muss am iPhone tatsächlich klingeln.
 3. Sprachverständlichkeit beider Richtungen, Echo, Unterbrechung und zusätzliche Latenz mit einem echten Anruf prüfen.
-4. Controller implementieren: feste Task-Zuordnung, keine Doppelstarts, begrenzte Wartezeiten und gemeinsames idempotentes Beenden von Telefon und eigener Voice-Sitzung. Nichtabheben, Geräteverlust, App-Fehler und Verbindungsabbruch testen.
+4. Offline-geprüften Call-Adapter an das echte Medienbackend anbinden. Feste Task-Zuordnung und gemeinsames idempotentes Beenden von Telegram und eigener Voice-Sitzung ergänzen. Nichtabheben, Geräteverlust, App-Fehler und Verbindungsabbruch im echten Aufbau testen.
 5. Erst danach automatische Rückfragen und T3-Code-Anbindung ergänzen.
 
 Ein möglicher Controller-Zustandsablauf ist `IDLE -> PREFLIGHT -> DIALING -> ANSWERED -> STARTING_VOICE -> ACTIVE -> STOPPING -> IDLE`. Dieser Ablauf ist nur ein Entwurf. Interne App-Symbole sind kein nachgewiesener öffentlicher Steuerungsendpunkt.

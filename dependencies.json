@@ -1,0 +1,14 @@
+{
+  "tdlib": {
+    "repository": "https://github.com/tdlib/td.git",
+    "revision": "d1085f9cebc5a62379991ae1652673954f229c1f",
+    "license": "BSL-1.0",
+    "target": "tdjson"
+  },
+  "tgcalls": {
+    "repository": "https://github.com/TelegramMessenger/tgcalls.git",
+    "revision": "efd330ca04f74706024a5abdfb5b41f4e4dd1065",
+    "license": "LGPL-3.0",
+    "status": "source inspected; standalone media build requires additional headers and matching WebRTC libraries"
+  }
+}
