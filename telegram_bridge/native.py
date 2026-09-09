@@ -92,8 +92,16 @@ def offline_native_check(path):
                 auth_state = event.get("authorization_state", {}).get("@type")
         if version is None or auth_state != "authorizationStateWaitTdlibParameters":
             raise NativeError("Unexpected native initialization state")
+        from .live import RequestPump, require_authorized
+        from .control import GateError
+        try:
+            require_authorized(RequestPump(td))
+        except GateError:
+            pass
+        else:
+            raise NativeError("Unauthenticated live-loop gate failed")
     finally:
         td.close()
     return {"mode": "native-offline", "tdlib_version": version,
             "authorization": "not_configured", "native_json": "ok", "close": "confirmed",
-            "login_requested": False, "media_ready": False}
+            "login_requested": False, "media_ready": False, "live_loop_auth_gate": "passed"}

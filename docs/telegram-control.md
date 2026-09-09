@@ -7,7 +7,7 @@ Stand: 10. September 2026. Telegram ist der gewählte Weg. WhatsApp-Business-App
 - Offizielles TDLib an Revision `d1085f9cebc5a62379991ae1652673954f229c1f` lokal aus Source gebaut: Version **1.8.67**, `libtdjson.dylib`, **Mach-O arm64**.
 - Echte C-API über Python-Standardbibliothek/ctypes geladen. Synchronen JSON-Parser ausgeführt, native Clientinstanz erzeugt, Version über asynchrones Request/Response gelesen, `authorizationStateWaitTdlibParameters` empfangen und `authorizationStateClosed` bestätigt.
 - Dieser native Check setzt keine TDLib-Parameter, meldet niemanden an, verlangt keinen Code, öffnet keine Datenbank und tätigt keine Anrufe. Keine Audio-Engine oder Route wird angefasst.
-- 27 Offline-Tests prüfen Call-Zustände, Rennen, Aussonderung fremder Calls, idempotentes Ende, fehlende Medienfähigkeit, Konfigurationsrechte und Authentifizierungsschritte. Die bestehende Swift-/Tongenerator-Prüfung besteht ebenfalls.
+- 34 Offline-Tests prüfen Call-Zustände, Rennen, Aussonderung fremder Calls, idempotentes Ende, fehlende Medienfähigkeit, Konfigurationsrechte, Authentifizierung, Zielauflösung und den begrenzten Eventloop. Die bestehende Swift-/Tongenerator-Prüfung besteht ebenfalls.
 - `demo` führt die echte eigene Steuerlogik mit ausdrücklich simuliertem Transport/Medienadapter aus. Sie ist kein Telegram-Netztest.
 
 ## Ausführen
@@ -42,7 +42,9 @@ Wenn Felix ein **bereits bestehendes, getrenntes Telegram-Absenderkonto** gewäh
 python3 -m telegram_bridge configure
 ```
 
-API-ID, API-Hash, ausdrücklich gewählte Absendernummer und Ziel-@username werden verdeckt eingelesen. Speicherung ausschließlich unter `~/Library/Application Support/CodexPhoneBridge/telegram/default/config.json`, Verzeichnis 0700/Datei 0600. Kein Argument mit Secrets, kein Git-Eintrag, kein Überschreiben bestehender Profile. Das ist lokale Zugriffsbeschränkung, keine Verschlüsselung der API-Konfigurationsdatei. Benutzername als Ziel muss noch kontrolliert in eine Telegram-User-ID aufgelöst werden; diese Netzfunktion ist noch nicht implementiert.
+API-ID, API-Hash, ausdrücklich gewählte Absendernummer und Ziel-@username werden verdeckt eingelesen. Speicherung ausschließlich unter `~/Library/Application Support/CodexPhoneBridge/telegram/default/config.json`, Verzeichnis 0700/Datei 0600. Kein Argument mit Secrets, kein Git-Eintrag, kein Überschreiben bestehender Profile. Das ist lokale Zugriffsbeschränkung, keine Verschlüsselung der API-Konfigurationsdatei.
+
+Die spätere Ergänzung `live.py` implementiert diese kontrollierte Auflösung jetzt: erst authentifizierte Sitzung prüfen, dann nur den angegebenen öffentlichen Benutzernamen über `searchPublicChat` auflösen. Private menschliche Zielidentität, aktueller Username, Unterschied zum eigenen Konto und `can_be_called` werden geprüft. Keine Kontaktliste oder Nachrichtenabfrage. Diese Funktion wurde noch nicht an einem echten Konto ausgeführt.
 
 Die eigene API-ID/API-Hash stammen von [Telegram](https://my.telegram.org), nicht von einem fremden Userbot-Projekt. Nach ausdrücklicher späterer Entscheidung zur Anmeldung:
 
@@ -60,12 +62,42 @@ Offizielles `TelegramMessenger/tgcalls`, Revision `efd330ca04f74706024a5abdfb5b4
 
 Ein echter lokaler `swift build -c release --jobs 2` im isolierten Vendor-Checkout scheiterte an **`absl/types/optional.h` fehlt**. Zusätzlich meldet der aktuelle Package-Scan das enthaltene CLI-main als widersprüchlich zum Library-Produkt. Es wurde kein beliebiges fremdes Binärpaket eingesetzt und kein Audio gestartet.
 
-Folge: `UnavailableMedia` sperrt jeden Start, bis ein passender offizieller WebRTC-/tgcalls-Build und unser Medienadapter existieren. Derzeit gibt es **keinen ausführbaren Live-Anrufbefehl**. Nur Zugangsdaten einzutragen macht die Telefonie noch nicht funktionsfähig. Diese Medienintegration ist offene Entwicklungsarbeit, kein Nutzerfehler. [Offizielles Package](https://github.com/TelegramMessenger/tgcalls/blob/efd330ca04f74706024a5abdfb5b41f4e4dd1065/Package.swift), [Medieninterface](https://github.com/TelegramMessenger/tgcalls/blob/efd330ca04f74706024a5abdfb5b41f4e4dd1065/tgcalls/Instance.h).
+Der historische Standalone-Fehler ist kein endgültiger Blocker. Der folgende kohärente Parent-Build ersetzt diesen Ansatz. `UnavailableMedia` sperrt weiterhin jeden Live-Start bis zum vollständigen Laufzeitadapter. Nur Zugangsdaten einzutragen macht die Telefonie nicht funktionsfähig. [Historisches Package](https://github.com/TelegramMessenger/tgcalls/blob/efd330ca04f74706024a5abdfb5b41f4e4dd1065/Package.swift).
+
+## Kohärenter offizieller Medienbuild
+
+`dependencies.json` enthält jetzt einen zusammengehörigen Telegram-iOS-Source-Snapshot:
+
+- Parent `6ad963e5b62d354da79040f388ae2b9132fb17b8`.
+- Dessen tgcalls-Gitlink `e3069322a3d1e16ecb11a5e302242e59ddd7f09e`.
+- Dessen WebRTC-Gitlink `3817e906cb6c22ec9cc62023b073e1a668d9cb33`, auf den von Telegram im Parent referenzierten `ali-fareed/webrtc`-Fork.
+- Abseil/BoringSSL/Opus/weitere Buildquellen und Bazel-Regeln aus genau diesem Parent-Baum bzw. dessen gepinnten Submodulen. Keine beliebigen separat installierten WebRTC-Header.
+
+Das offizielle Bazel-8.4.2-arm64-Binary wird gegen den dokumentierten SHA-256 geprüft und nur nach `.build/tools` geladen. Das Skript baut einen macOS-CLI-Target, nicht die signierte iOS-App. Ein leeres `build_configuration`-Modul erfüllt nur die unbenutzte Repository-Deklaration; keine API-Schlüssel, Provisioning-Profile oder erfundenen Identitäten werden eingetragen. Sicherheits-/Hashprüfungen werden nicht abgeschaltet.
+
+```sh
+python3 scripts/build-media.py
+python3 -m telegram_bridge media-check
+```
+
+Eigener Code in `native/media_probe.cpp` registriert die echte `InstanceV2Impl` und liest `Meta::Versions()` / `Meta::MaxLayer()` aus dem gelinkten Mediencode. Er ruft **nicht** `Meta::Create` auf, erzeugt keine PeerConnection und öffnet kein Audiogerät. Ein erfolgreicher Probe ist daher ein echter Build-/Linknachweis, noch kein Medien-Laufzeitnachweis. Das upstream `tgcalls_core`-Target verwendet den nicht-iOS-Platform-Adapter; dessen Hardware-/PCM-Anbindung bleibt in unserem Runtime-Adapter explizit zu prüfen. [Parent](https://github.com/TelegramMessenger/Telegram-iOS/tree/6ad963e5b62d354da79040f388ae2b9132fb17b8), [Bazel-Medientarget](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TgVoipWebrtc/BUILD).
+
+**Ausgeführter Build-/Linknachweis:** Der Kernbuild durchlief 1.939 Aktionen erfolgreich. Der nachfolgende Probe-Link deckte auf, dass das offizielle CLI-Beispiel die nicht mitgebaute `AudioDeviceModule::Create`-Factory durch einen Null-Platzhalter ersetzt. Diesen Platzhalter übernehmen wir nicht. `native/macos_adm.BUILD` ergänzt stattdessen ausschließlich Buildregeln für die echte macOS-ADM-/PortAudio-Ringbuffer-Implementierung aus exakt demselben gepinnten WebRTC-Quellbaum. Keine Änderungen am Netzwerk-/Medienquellcode und keine Ersatz-Factory.
+
+Das Ergebnis wurde als **Mach-O arm64** geprüft. Native Ausführung liefert tatsächlich **7.0.0, 8.0.0, 9.0.0, 12.0.0, 13.0.0**, maximaler Layer **92**, `audio_opened=false`, `call_created=false`, `live_adapter_ready=false`. Der vollständige Buildskriptlauf mit dieser Ergänzung und anschließender Metadatenprobe war erfolgreich. Symbole der echten `AudioDeviceMac`-Implementierung sind im Binary enthalten, ihre Funktionen wurden nicht aufgerufen.
+
+Der Laufzeitadapter bleibt offene Implementierung: TDLib-Schlüssel-/Serverdaten sicher in einen tgcalls-Descriptor übersetzen, Medienschlüssel nicht loggen, Signaling-/State-Callbacks verbinden und Geräte-UIDs vor Aufnahme/Wiedergabe sicher prüfen. Der upstream Gerätehelper kann bei fehlendem Gerät auf Default zurückfallen; unser Adapter darf diese Fallback-Logik nicht ungeprüft übernehmen. Solange dies nicht implementiert und in einem ausdrücklich erlaubten Audio-Test geprüft ist, bleibt der Live-Anrufbefehl gesperrt. Die fehlende Medienbibliothek ist jetzt **kein** Blocker mehr; verbleibende Adapterarbeit ist getrennt von den noch nicht angegebenen Kontodaten.
+
+## Angebundener Live-Eventloop, weiterhin gesperrter Live-Befehl
+
+`LiveCallLoop` verbindet autorisierten TDLib-Client, kontrollierte Zielauflösung, `CallSession` und injiziertes Medienbackend. Mediencallbacks werden über eine begrenzte Queue auf den TDLib-Eventthread überführt. Ein Call ist auf maximal 180 Sekunden beschränkt; im `finally` wird das Ende angefordert und begrenzt bestätigt. Authentifizierungsverlust führt zum Abbruch statt zu stiller Neuanmeldung. `RequestPump` protokolliert keine rohen Telegram-Antworten.
+
+Ohne verfügbares Medienbackend bricht der Loop **vor jeder TDLib-Anfrage** ab. Es gibt weiterhin keinen CLI-Befehl, der einen echten Anruf starten kann. Im realen nativen Offlinecheck wurde `require_authorized` gegen TDLib im unkonfigurierten Zustand geprüft und abgewiesen, ohne Login oder Zielabfrage. Die übrigen Eventloop-Fälle sind Offline-Tests, kein Netzbeweis.
 
 ## Nächste Schritte und getrennte Gates
 
 1. Accountwahl von Felix, API-Daten nur lokal, bestätigter Telegram-Empfänger. Anmeldung nur bewusst durchführen. Keine neue Kontoregistrierung automatisch starten.
-2. Passenden offiziellen WebRTC-Source/Build zur gepinnten tgcalls-Version einbinden und ein Audio-only-Backend mit Geräte-Readback, State-/Signaling-Brücke und echtem Stop implementieren. Das Protokoll aus diesem Backend exportieren, dann Zielauflösung und authentifizierten Eventloop verbinden.
+2. Den nativen Mediencode über einen Runtime-Adapter mit TDLib-Ready-/Signaling-Daten, Geräte-/PCM-Anbindung und echtem Stop verbinden. Zielauflösung/Eventloop sind implementiert, aber noch nicht mit einer authentifizierten Sitzung und diesem Backend gemeinsam ausgeführt. Native Metadaten allein dürfen `available=true` nicht freischalten.
 3. Erst damit einen klar begrenzten echten Telegram-Anruf testen: Klingeln am gesperrten iPhone, Annahme, bidirektionales Audio, Fehler und Auflegen. Keine Fake-Media-Konfiguration im Netz verwenden.
 4. Audio-Routing bleibt eigene Schicht. Loopback Trial rauscht; BlackHole/Process Tap sind noch nicht gebaut/installiert. Für Dauerbetrieb nicht auf Trial-Rauschen oder manuelle Resets bauen.
 5. Original-Codex-Voice-Autostart ist nicht bewiesen. Ein Telegram-Call bedeutet keine gestartete Codex-Voice-Sitzung. T3-Ereignisse kommen erst nach diesen Nachweisen.

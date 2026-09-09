@@ -61,6 +61,8 @@ def main():
     sub = parser.add_subparsers(dest="command", required=True)
     native = sub.add_parser("native-check", help="Load TDLib; no login, network setup or audio")
     native.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    media = sub.add_parser("media-check", help="Inspect linked native media capabilities; no media instance or devices")
+    media.add_argument("--probe", type=Path, default=Path(".build/vendor/telegram-ios/bazel-bin/bridge_probe/media_probe"))
     sub.add_parser("demo", help="Offline start/status/end simulation; no real call")
     config = sub.add_parser("configure", help="Hidden local input only; sends nothing to Telegram")
     config.add_argument("--profile", default="default")
@@ -72,6 +74,9 @@ def main():
     args = parser.parse_args()
     if args.command == "native-check":
         emit(offline_native_check(args.library))
+    elif args.command == "media-check":
+        from .media import inspect_media
+        emit(inspect_media(args.probe))
     elif args.command == "demo":
         demo()
     elif args.command == "configure":
@@ -97,8 +102,7 @@ def main():
               "original_voice_autostart_verified": False,
               "ready_for_live_call": False,
               "blockers": (["local_account_configuration"] if not configured else []) + [
-                  "authenticated_session_not_checked", "tgcalls_media_adapter_not_built",
-                  "confirmed_target_resolution_not_implemented",
+                  "authenticated_session_not_checked", "live_media_adapter_not_ready",
                   "original_voice_start_not_verified"]})
         return 2
     elif args.command == "login":

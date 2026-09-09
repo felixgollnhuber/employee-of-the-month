@@ -13,7 +13,7 @@ Der lokale Audioweg ist erprobt, eine vollständige Telefonbrücke ist noch nich
 
 **Gewählter Telefonieweg: Telegram über einen regulären eigenen Benutzerclient.** Die WhatsApp-Business-App bleibt unverändert. Kein weiterer FaceTime-/Providervergleich ist Teil der Umsetzung.
 
-Das Repository enthält jetzt zusätzlich einen Telegram-Anrufsteuerungsadapter, eine Bindung an die offizielle TDLib-JSON-C-API, lokale Accountkonfiguration und einen ausdrücklich gestarteten Login-Pfad. TDLib 1.8.67 wurde nativ für arm64 gebaut und ohne Anmeldung geprüft. Die Steuerlogik besteht Offline-Tests. **Echte Telegram-Anrufe sind noch gesperrt:** Der offizielle tgcalls-Medienbuild benötigt zusätzliche passende WebRTC-Abhängigkeiten, Zielauflösung/Live-Eventloop fehlen noch. Die sichtbare Demo ist ausdrücklich eine Simulation. [Stand und Befehle](docs/telegram-control.md).
+Das Repository enthält einen Telegram-Anrufsteuerungsadapter, die offizielle TDLib-JSON-C-API-Anbindung, lokale Accountkonfiguration, expliziten Login sowie kontrollierte Zielauflösung und Eventloop. TDLib 1.8.67 und ein kohärenter offizieller tgcalls/WebRTC-Medienbaum wurden nativ für arm64 gebaut und ohne Anmeldung/Audio geprüft. Eine echte gelinkte Medienprobe meldet Bibliotheksversionen und Layer 92; 34 Offline-Tests bestehen. **Echte Telegram-Anrufe sind noch gesperrt:** Der Laufzeitadapter zwischen TDLib-Ready/Signaling und tgcalls einschließlich sicherer Audiogerätebindung fehlt noch. Die sichtbare Demo bleibt ausdrücklich Simulation. [Stand und Befehle](docs/telegram-control.md).
 
 ## Aufbau
 
@@ -38,6 +38,7 @@ Beim letzten lokalen Test war zusätzlich das physische MacBook-Mikrofon im Hinw
 - `docs/manual-test.md`: CLI-Modi und manuelle Testfolge.
 - `telegram_bridge/`: TDLib-Bindung, Audio-only-Call-Lifecycle, private lokale Konfiguration und expliziter Login.
 - `dependencies.json`: geprüfte offizielle TDLib-/tgcalls-Revisionen.
+- `scripts/build-media.py`, `native/`: zusammengehöriger Telegram-/WebRTC-Build und echte native Metadatenprobe ohne Audiozugriff.
 - `docs/telegram-control.md`: native Buildbefunde, Offlinechecks und offene Live-/Medien-Gates.
 
 ## Lokaler Build und Prüfung
