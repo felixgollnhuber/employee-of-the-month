@@ -180,6 +180,17 @@ class ControlTests(unittest.TestCase):
         self.assertFalse(self.session.status()["media_cleanup_confirmed"])
         self.assertEqual(self.sent[-1]["@type"], "discardCall")
 
+    def test_reconnecting_is_not_reported_as_active_and_has_own_deadline(self):
+        self.start(); self.created()
+        self.session.handle(self.event("callStateReady")); self.media.callback("connected")
+        self.now += 60; self.media.callback("reconnecting"); self.session.tick()
+        self.assertEqual(self.session.phase, "media_reconnecting")
+        self.assertFalse(self.session.status()["media_connected"])
+        self.now += 2; self.media.callback("connected")
+        self.assertEqual(self.session.phase, "active")
+        self.media.callback("reconnecting"); self.now += 21; self.session.tick()
+        self.assertEqual(self.session.phase, "ending")
+
 
 if __name__ == "__main__":
     unittest.main()

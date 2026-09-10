@@ -1,4 +1,4 @@
-.PHONY: build fixture check telegram-check telegram-native telegram-media
+.PHONY: build fixture check telegram-check telegram-native telegram-media telegram-runtime
 
 build: .build/AudioBridgeTest
 
@@ -24,3 +24,6 @@ telegram-native:
 telegram-media:
 	python3 scripts/build-media.py
 	python3 -m telegram_bridge media-check
+
+telegram-runtime: telegram-media
+	python3 scripts/check-media-runtime.py

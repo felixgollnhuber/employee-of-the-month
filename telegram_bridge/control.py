@@ -44,6 +44,7 @@ class CallSession:
         self.target = None
         self.created_at = None
         self.connected_at = None
+        self.reconnecting_at = None
         self.stop_at = None
         self.stopping = False
         self.discard_sent = False
@@ -112,9 +113,13 @@ class CallSession:
         self._discard()
 
     def media_event(self, state):
-        if state == "connected" and self.media_started and not self.stopping and self.phase in ("media_connecting", "active"):
+        if state == "connected" and self.media_started and not self.stopping and self.phase in ("media_connecting", "media_reconnecting", "active"):
             self.phase = "active"
             self.connected_at = self.connected_at or self.clock()
+            self.reconnecting_at = None
+        elif state == "reconnecting" and self.phase == "active" and not self.stopping:
+            self.phase = "media_reconnecting"
+            self.reconnecting_at = self.clock()
         elif state == "failed":
             self.end("media_failed")
 
@@ -209,7 +214,9 @@ class CallSession:
     def tick(self):
         if self.created_at is None or self.phase in ("ended", "failed"):
             return
-        if not self.stopping and self.phase != "active" and self.clock() - self.created_at >= self.start_timeout:
+        if not self.stopping and self.phase == "media_reconnecting" and self.clock() - self.reconnecting_at >= self.start_timeout:
+            self.end("media_failed")
+        elif not self.stopping and self.phase not in ("active", "media_reconnecting") and self.clock() - self.created_at >= self.start_timeout:
             self.end("startup_timeout")
         if self.stopping and self.clock() - self.stop_at >= self.end_timeout:
             self.phase = "end_unconfirmed"  # Never equate a timeout with confirmed hangup.

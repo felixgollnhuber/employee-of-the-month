@@ -37,9 +37,13 @@ def private_directory(path):
 
 def write_profile(path, data):
     data = validate(data)
+    write_private_json(path, "config.json", data)
+
+
+def write_private_json(path, name, data):
     private_directory(path)
     flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW
-    fd = os.open(path / "config.json", flags, 0o600)
+    fd = os.open(path / name, flags, 0o600)
     with os.fdopen(fd, "w") as stream:
         json.dump(data, stream)
         stream.write("\n")
@@ -48,14 +52,35 @@ def write_profile(path, data):
 
 
 def read_profile(path):
+    return validate(read_private_json(path, "config.json"))
+
+
+def read_private_json(path, name):
     if not path.exists():
         raise ConfigError("No local profile configured")
     private_directory(path)
-    fd = os.open(path / "config.json", os.O_RDONLY | os.O_NOFOLLOW)
+    fd = os.open(path / name, os.O_RDONLY | os.O_NOFOLLOW)
     with os.fdopen(fd) as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ConfigError("Configuration must be an owner-only regular file (0600)")
         if info.st_size > 8192:
             raise ConfigError("Configuration is too large")
-        return validate(json.load(stream))
+        return json.load(stream)
+
+
+def write_routing(path, input_uid, output_uid):
+    from .descriptor import device_uid
+    a, b = device_uid(input_uid), device_uid(output_uid)
+    if a == b:
+        raise ConfigError("Separate input and output UIDs required")
+    write_private_json(path, "routing.json", {"input_uid": a, "output_uid": b})
+
+
+def read_routing(path):
+    from .descriptor import device_uid
+    data = read_private_json(path, "routing.json")
+    a, b = device_uid(data.get("input_uid")), device_uid(data.get("output_uid"))
+    if a == b:
+        raise ConfigError("Separate input and output UIDs required")
+    return {"input_uid": a, "output_uid": b}

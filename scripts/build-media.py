@@ -18,6 +18,8 @@ pins = json.loads((root / "dependencies.json").read_text())
 parent = pins["media_parent"]
 source = root / ".build/vendor/telegram-ios"
 tools = root / ".build/tools"
+ownership_path = root / ".build/media-generated-hashes.json"
+ownership = json.loads(ownership_path.read_text()) if ownership_path.exists() else {}
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("--jobs", type=int, default=4)
 args = parser.parse_args()
@@ -33,6 +35,17 @@ def git_value(*command):
     return subprocess.check_output(["git", "-C", str(source), *command], text=True).strip()
 
 
+def owned_write(path, data, baseline=None):
+    key = str(path.relative_to(source))
+    if path.exists():
+        previous = path.read_bytes()
+        if previous not in (data, baseline) and hashlib.sha256(previous).hexdigest() != ownership.get(key):
+            parser.error("Preserving unknown changes in generated build inputs")
+    path.write_bytes(data)
+    ownership[key] = hashlib.sha256(data).hexdigest()
+    ownership_path.write_text(json.dumps(ownership, indent=2) + "\n")
+
+
 source.parent.mkdir(parents=True, exist_ok=True)
 if not source.exists():
     run("git", "init", str(source))
@@ -43,7 +56,7 @@ if not source.exists():
 if git_value("rev-parse", "HEAD") != parent["revision"]:
     parser.error("Preserving existing parent checkout with different revision")
 modified = git_value("diff", "HEAD", "--name-only")
-if modified and modified != "third-party/webrtc/BUILD":
+if set(modified.splitlines()) - {"third-party/webrtc/BUILD", "third-party/webrtc/webrtc"}:
     parser.error("Preserving modified tracked parent sources")
 for relative, expected in ((parent["tgcalls_path"], pins["tgcalls"]["revision"]),
                            (parent["webrtc_path"], parent["webrtc_revision"])):
@@ -52,13 +65,12 @@ for relative, expected in ((parent["tgcalls_path"], pins["tgcalls"]["revision"])
 run("git", "-C", str(source), "sparse-checkout", "set", "submodules/TgVoipWebrtc", "submodules/ffmpeg", "third-party", "build-system")
 run("git", "-C", str(source), "submodule", "update", "--init", "--depth", "1", "--",
     "submodules/TgVoipWebrtc/tgcalls", "third-party", "build-system/bazel-rules")
+run("python3", str(root / "scripts/media-source-guard.py"), str(source / parent["webrtc_path"]))
 
 upstream_build = subprocess.check_output(["git", "-C", str(source), "show", "HEAD:third-party/webrtc/BUILD"])
 build_file = source / "third-party/webrtc/BUILD"
 extended_build = upstream_build + b"\n" + (root / "native/macos_adm.BUILD").read_bytes()
-if build_file.read_bytes() not in (upstream_build, extended_build):
-    parser.error("Preserving unknown WebRTC build-file changes")
-build_file.write_bytes(extended_build)
+owned_write(build_file, extended_build, upstream_build)
 
 tools.mkdir(parents=True, exist_ok=True)
 bazel = tools / ("bazel-" + pins["bazel"]["version"] + "-darwin-arm64")
@@ -83,13 +95,13 @@ for name, content in (("MODULE.bazel", 'module(name = "build_configuration")\n')
     path.write_text(content)
 probe = source / "bridge_probe"
 probe.mkdir(exist_ok=True)
-for source_name, destination in (("media_probe.BUILD", "BUILD"), ("media_probe.cpp", "media_probe.cpp")):
+for source_name, destination in (("media_probe.BUILD", "BUILD"), ("media_probe.cpp", "media_probe.cpp"),
+                                 ("media_runtime.cpp", "media_runtime.cpp"), ("strict_devices.cpp", "strict_devices.cpp"),
+                                 ("strict_devices.h", "strict_devices.h")):
     content = (root / "native" / source_name).read_bytes()
     path = probe / destination
-    if path.exists() and path.read_bytes() != content:
-        parser.error("Preserving modified staged probe; inspect before replacing")
-    path.write_bytes(content)
+    owned_write(path, content)
 run(str(bazel), "--output_user_root=" + str(root / ".build/bazel-cache"), "build",
-    "//bridge_probe:media_probe", "--apple_platform_type=macos", "--cpu=darwin_arm64",
+    "//bridge_probe:media_probe", "//bridge_probe:media_runtime", "--apple_platform_type=macos", "--cpu=darwin_arm64",
     "-c", "opt", "--jobs=" + str(args.jobs), cwd=source)
 print("Built metadata probe:", source / "bazel-bin/bridge_probe/media_probe")

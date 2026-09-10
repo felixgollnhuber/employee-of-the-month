@@ -6,6 +6,7 @@ import hashlib
 import os
 from pathlib import Path
 import time
+from contextlib import contextmanager
 
 from .config import private_directory, read_profile
 from .native import TDJson
@@ -104,5 +105,46 @@ def login(profile, library, emit):
                 if request:
                     td.send(request)
             raise AuthGate("Login timeout")
+        finally:
+            td.close()
+
+
+@contextmanager
+def existing_authenticated_client(profile, library):
+    """Open only a previously logged-in session. Never requests a login code."""
+    config = read_profile(profile)
+    database = profile / "database"
+    if not database.is_dir() or not (profile / "key-salt").is_file():
+        raise AuthGate("Explicit login required before a call test")
+    private_directory(database)
+    fd = os.open(profile / "session.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(fd, "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        key = local_key(profile)
+        td = TDJson(library)
+        td.open()
+        try:
+            td.send({"@type": "getAuthorizationState"})
+            deadline = time.monotonic() + 30
+            parameters_sent = False
+            while time.monotonic() < deadline:
+                event = td.receive(0.2)
+                if not event: continue
+                kind = event.get("@type", "")
+                if kind == "error": raise AuthGate("Existing session failed")
+                state = event.get("authorization_state", {}) if kind == "updateAuthorizationState" else event
+                phase = state.get("@type", "")
+                if phase == "authorizationStateWaitTdlibParameters" and not parameters_sent:
+                    td.send(auth_request(state, config, database, key)); parameters_sent = True
+                elif phase == "authorizationStateReady":
+                    from .live import RequestPump
+                    me = RequestPump(td).request("getMe")
+                    if me.get("phone_number") != config["sender_phone"].lstrip("+"):
+                        raise AuthGate("Configured sender differs from authenticated account")
+                    yield td
+                    return
+                elif phase.startswith("authorizationState") and phase != "authorizationStateWaitTdlibParameters":
+                    raise AuthGate("Explicit login required; no automatic code request")
+            raise AuthGate("Existing session timeout")
         finally:
             td.close()

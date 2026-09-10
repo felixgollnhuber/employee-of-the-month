@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from telegram_bridge.config import ConfigError, profile_path, read_profile, write_profile
+from telegram_bridge.config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing
 
 
 class ConfigTests(unittest.TestCase):
@@ -47,6 +47,14 @@ class ConfigTests(unittest.TestCase):
         with self.assertRaises(ConfigError):
             write_profile(self.path, {**self.fixture, "sender_phone": "use my WhatsApp number"})
         self.assertFalse(self.path.exists())
+
+    def test_private_routing_roundtrip(self):
+        write_routing(self.path, "fixture.input", "fixture.output")
+        self.assertEqual(read_routing(self.path), {"input_uid": "fixture.input", "output_uid": "fixture.output"})
+        self.assertEqual((self.path / "routing.json").stat().st_mode & 0o777, 0o600)
+
+    def test_routing_rejects_same_device(self):
+        with self.assertRaises(ConfigError): write_routing(self.path, "same", "same")
 
 
 if __name__ == "__main__":

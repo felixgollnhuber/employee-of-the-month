@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 
-from .config import ConfigError, profile_path, read_profile, write_profile
+from .config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing
 from .control import CallSession
 from .native import offline_native_check
 
@@ -66,6 +66,8 @@ def main():
     sub.add_parser("demo", help="Offline start/status/end simulation; no real call")
     config = sub.add_parser("configure", help="Hidden local input only; sends nothing to Telegram")
     config.add_argument("--profile", default="default")
+    routing = sub.add_parser("configure-audio", help="Choose exact device UIDs locally; no audio or routing is started")
+    routing.add_argument("--profile", default="default")
     auth = sub.add_parser("login", help="Explicit Telegram login; MAY REQUEST A LOGIN CODE, never creates accounts or calls")
     auth.add_argument("--profile", default="default")
     auth.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
@@ -97,14 +99,38 @@ def main():
             configured = True
         except (OSError, ConfigError, ValueError):
             configured = False
+        try:
+            read_routing(profile_path(args.profile))
+            routing_present = True
+        except Exception:
+            routing_present = False
         emit({"configuration_present_and_private": configured,
-              "telegram_authenticated": "not_checked_offline", "native_media_ready": False,
+              "routing_present_and_private": routing_present,
+              "telegram_authenticated": "not_checked_offline", "live_audio_verified": False,
               "original_voice_autostart_verified": False,
               "ready_for_live_call": False,
-              "blockers": (["local_account_configuration"] if not configured else []) + [
-                  "authenticated_session_not_checked", "live_media_adapter_not_ready",
+              "blockers": (["local_account_configuration"] if not configured else []) +
+                  (["exact_audio_device_configuration"] if not routing_present else []) + [
+                  "authenticated_session_not_checked", "authorized_live_audio_test_required",
                   "original_voice_start_not_verified"]})
         return 2
+    elif args.command == "configure-audio":
+        if not sys.stdin.isatty():
+            raise ConfigError("Interactive terminal required")
+        from .runtime import NativeIPC
+        ipc = NativeIPC()
+        try:
+            choices = ipc.request("devices")["devices"]
+        finally:
+            ipc.close()
+        for index, device in enumerate(choices):
+            print(index, device["name"], "input=" + str(device["input"]), "output=" + str(device["output"]))
+        a = int(input("Eingangsgerät für Original-Codex-Ausgabe (Nummer): "))
+        b = int(input("Ausgangsgerät zum Codex-Mikrofon (Nummer): "))
+        if not 0 <= a < len(choices) or not 0 <= b < len(choices) or not choices[a]["input"] or not choices[b]["output"]:
+            raise ConfigError("Invalid device direction")
+        write_routing(profile_path(args.profile), choices[a]["uid"], choices[b]["uid"])
+        emit({"routing_configured": True, "audio_opened": False, "routes_changed": False})
     elif args.command == "login":
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required for authorized login")

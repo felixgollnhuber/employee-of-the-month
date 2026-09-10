@@ -1,5 +1,46 @@
 # Telegram-Steuerung: überprüfte Zwischenimplementierung
 
+## Aktueller Runtime-Stand
+
+Die native Runtime-Integration ist jetzt implementiert, nicht mehr nur geplant. `telegram_bridge/application.py` komponiert vorhandene authentifizierte Sitzung, kontrollierte Zielauflösung, `LiveCallLoop` und `NativeMedia`. Der Helper `media_runtime` konstruiert einen echten tgcalls-Descriptor und enthält die tatsächlichen Create-/Signaling-/Stop-Aufrufe. Seine Ausführung mit Audio ist doppelt gesperrt: explizite Freigabe am Python-Einstieg und `--allow-audio` im getrennten nativen Prozess. **Aktuell wurden weder Anmeldung noch Call noch Audiostart ausgeführt.**
+
+**Geprüft:** 47 Offline-Tests, native TDLib-Checks und neun echte native Runtime-/IPC-Prüfungen. Letztere erzeugen einen tatsächlichen Descriptor mit 256-Byte-Testschlüssel und fünf Relay-Einträgen, prüfen Ablehnung ungültiger Daten, Startverweigerung ohne Audiofreigabe, Status, wiederholtes Stop und fehlende Payloads in Ausgaben. Sie rufen `Meta::Create` nicht auf. Damit ist der Kontrollpfad geprüft, noch nicht die Audiowiedergabe oder Telegram-Interoperabilität mit einem echten Konto.
+
+Der Apple-Linker meldet beim nativen Binary eine reduzierte Ausrichtung von `__DATA,__common` (0x8000 auf 0x4000). Der Build und die nativen Kontrolltests bestehen; die Warnung wurde nicht unterdrückt. Eine Aussage zur vollständigen Audio-Laufzeitstabilität wird daraus nicht abgeleitet.
+
+```sh
+make check
+make telegram-runtime
+python3 -m telegram_bridge native-check
+python3 -m telegram_bridge preflight
+```
+
+`make telegram-runtime` kann Build-Abhängigkeiten herunterladen, startet aber in den Checks keine Audiogeräte oder Anrufe. Die bisherige `demo` bleibt Simulation und ist kein Ersatz für diese nativen Prüfungen.
+
+### Daten, Ereignisse und Gerätetreue
+
+`descriptor.py` validiert TDLib-Ready, 256-Byte-Schlüssel, Peer-Privacy und Relay-Daten. Es unterstützt zunächst ausschließlich den echten ausgehandelten Pfad **12.0.0**, Layer **65 bis 92** gemäß gepinntem TDLib-Schema. Unbekannte Versionen werden abgelehnt. Reflector-IDs werden numerisch sortiert auf 1..N abgebildet, Peer-Tags hexkodiert, IPv4/IPv6 und STUN/TURN getrennt übernommen, entsprechend dem offiziellen [OngoingCallContext](https://github.com/TelegramMessenger/Telegram-iOS/blob/6ad963e5b62d354da79040f388ae2b9132fb17b8/submodules/TelegramVoip/Sources/OngoingCallContext.swift). Eine Registrierung aller bekannten Libraryversionen bedeutet keine Freigabe ungeprüfter Adaptervarianten.
+
+Der native Helper übermittelt State-/Signaling-Callbacks über **private Pipes**, nicht über Logdateien. Normale Library-stdout/stderr-Ausgaben sind verworfen, Core-Dumps deaktiviert. IPC muss selbstverständlich Schlüssel und Signaling im Arbeitsspeicher transportieren; diese Frames dürfen nicht als Diagnoselog gespeichert werden. Diagnoseantworten enthalten nur feste Fehlercodes und Metadaten. Stop wartet begrenzt auf den nativen Abschluss, sonst wird der Prozess beendet und der Controller meldet ein unbestätigtes Ende statt Erfolg. Reconnecting ist ein eigener Zustand mit begrenzter Frist.
+
+`strict_devices.cpp` löst ausschließlich die konfigurierten UIDs auf, prüft Ein-/Ausgangsfähigkeit und Lebendigkeit und hält die erste Geräte-ID fest. Der Runtime-Wrapper lehnt Default-Auswahl ab. Zusätzlich fügt `media-source-guard.py` einen engen, reproduzierbaren Hook in die gepinnte macOS-ADM-Initialisierung ein: Der tatsächliche AudioDeviceID kommt ausschließlich aus dem UID-Resolver, niemals aus dem potenziell wechselnden Geräteindex oder Systemdefault. Bei Verlust wird beendet statt automatisch umgebunden. Andere Quellcodeänderungen werden verweigert. Diese Schutzlogik ist kompiliert/geprüft; ein physischer Geräteverlusttest braucht den späteren erlaubten Audiolauf.
+
+### Noch genau benötigter Zugang-/Audiotest
+
+Die bereits offene Accountfrage bleibt unverändert. Wenn die Angaben bereitstehen, lokale Schritte:
+
+```sh
+python3 -m telegram_bridge configure
+python3 -m telegram_bridge configure-audio
+python3 -m telegram_bridge login
+```
+
+`configure-audio` zeigt lediglich CoreAudio-Gerätemetadaten, lässt explizit Ein-/Ausgang auswählen und speichert deren UIDs in einer privaten `routing.json` (0600). Es startet keine Geräte und ändert keine globalen Routen. `login` kann einen Code anfordern und darf erst bewusst für das gewählte Konto ausgeführt werden. Keiner dieser Schritte wurde während der Umsetzung ausgeführt.
+
+Danach kann der Koordinator die vorhandene Funktion `run_authorized_call_test` für den **konkret freigegebenen** Anruf-/Audiotest aufrufen. Ohne `audio_and_call_authorized=True` greift sie nicht einmal auf Konfiguration oder native Bibliotheken zu. Sie verlangt einen bestehenden Login, prüft dessen Absendernummer gegen das konfigurierte Konto und fordert niemals selbst einen neuen Anmeldecode an. Ein frei automatisch gestarteter CLI-Anruf ist weiterhin nicht angeboten. Hier fehlt kein weiterer Platzhalter in der Runtime-Komposition; offen ist die echte Prüfung am Konto und den Audiogeräten.
+
+Zu prüfen sind dann: echte Empfängerzustellung, kompatibles Server-/Key-Material, macOS-Mikrofonberechtigung, beide Audiorichtungen, Geräteverlust und beidseitiges Auflegen. **Original-Voice-Autostart und der kostenlose Loopback-Ersatz sind weiterhin separate offene Aufgaben.** Trial-Rauschen wurde nicht umgangen. Die folgenden Abschnitte enthalten Hintergrund und frühere Buildbefunde.
+
 Stand: 10. September 2026. Telegram ist der gewählte Weg. WhatsApp-Business-App bleibt erhalten, FaceTime und andere Telefonanbieter werden nicht weiterverfolgt. Original-Codex-Voice bleibt zwingend; keine eigene Realtime- oder TTS-Antwort.
 
 ## Tatsächlich gebaut und ausgeführt
@@ -7,7 +48,7 @@ Stand: 10. September 2026. Telegram ist der gewählte Weg. WhatsApp-Business-App
 - Offizielles TDLib an Revision `d1085f9cebc5a62379991ae1652673954f229c1f` lokal aus Source gebaut: Version **1.8.67**, `libtdjson.dylib`, **Mach-O arm64**.
 - Echte C-API über Python-Standardbibliothek/ctypes geladen. Synchronen JSON-Parser ausgeführt, native Clientinstanz erzeugt, Version über asynchrones Request/Response gelesen, `authorizationStateWaitTdlibParameters` empfangen und `authorizationStateClosed` bestätigt.
 - Dieser native Check setzt keine TDLib-Parameter, meldet niemanden an, verlangt keinen Code, öffnet keine Datenbank und tätigt keine Anrufe. Keine Audio-Engine oder Route wird angefasst.
-- 34 Offline-Tests prüfen Call-Zustände, Rennen, Aussonderung fremder Calls, idempotentes Ende, fehlende Medienfähigkeit, Konfigurationsrechte, Authentifizierung, Zielauflösung und den begrenzten Eventloop. Die bestehende Swift-/Tongenerator-Prüfung besteht ebenfalls.
+- 47 Offline-Tests prüfen Call-Zustände, Rennen, Aussonderung fremder Calls, idempotentes Ende, fehlende Medienfreigabe, Konfigurationsrechte, Authentifizierung, Zielauflösung, Descriptor-Abbildung und den begrenzten Eventloop. Die bestehende Swift-/Tongenerator-Prüfung besteht ebenfalls.
 - `demo` führt die echte eigene Steuerlogik mit ausdrücklich simuliertem Transport/Medienadapter aus. Sie ist kein Telegram-Netztest.
 
 ## Ausführen
@@ -86,7 +127,7 @@ Eigener Code in `native/media_probe.cpp` registriert die echte `InstanceV2Impl` 
 
 Das Ergebnis wurde als **Mach-O arm64** geprüft. Native Ausführung liefert tatsächlich **7.0.0, 8.0.0, 9.0.0, 12.0.0, 13.0.0**, maximaler Layer **92**, `audio_opened=false`, `call_created=false`, `live_adapter_ready=false`. Der vollständige Buildskriptlauf mit dieser Ergänzung und anschließender Metadatenprobe war erfolgreich. Symbole der echten `AudioDeviceMac`-Implementierung sind im Binary enthalten, ihre Funktionen wurden nicht aufgerufen.
 
-Der Laufzeitadapter bleibt offene Implementierung: TDLib-Schlüssel-/Serverdaten sicher in einen tgcalls-Descriptor übersetzen, Medienschlüssel nicht loggen, Signaling-/State-Callbacks verbinden und Geräte-UIDs vor Aufnahme/Wiedergabe sicher prüfen. Der upstream Gerätehelper kann bei fehlendem Gerät auf Default zurückfallen; unser Adapter darf diese Fallback-Logik nicht ungeprüft übernehmen. Solange dies nicht implementiert und in einem ausdrücklich erlaubten Audio-Test geprüft ist, bleibt der Live-Anrufbefehl gesperrt. Die fehlende Medienbibliothek ist jetzt **kein** Blocker mehr; verbleibende Adapterarbeit ist getrennt von den noch nicht angegebenen Kontodaten.
+Der damalige Laufzeitadapter-Implementierungspunkt ist durch den oben beschriebenen nativen Helper und UID-Guard erledigt. Die fehlende Medienbibliothek ist ebenfalls kein Blocker mehr. Der reale Audio-/Konto-Test bleibt erforderlich.
 
 ## Angebundener Live-Eventloop, weiterhin gesperrter Live-Befehl
 
@@ -97,7 +138,7 @@ Ohne verfügbares Medienbackend bricht der Loop **vor jeder TDLib-Anfrage** ab. 
 ## Nächste Schritte und getrennte Gates
 
 1. Accountwahl von Felix, API-Daten nur lokal, bestätigter Telegram-Empfänger. Anmeldung nur bewusst durchführen. Keine neue Kontoregistrierung automatisch starten.
-2. Den nativen Mediencode über einen Runtime-Adapter mit TDLib-Ready-/Signaling-Daten, Geräte-/PCM-Anbindung und echtem Stop verbinden. Zielauflösung/Eventloop sind implementiert, aber noch nicht mit einer authentifizierten Sitzung und diesem Backend gemeinsam ausgeführt. Native Metadaten allein dürfen `available=true` nicht freischalten.
+2. Den fertig vorbereiteten Runtime-Pfad mit vorhandener authentifizierter Sitzung und explizit erlaubtem Audiozugriff prüfen. Native Metadaten allein sind keine Freigabe für den Start.
 3. Erst damit einen klar begrenzten echten Telegram-Anruf testen: Klingeln am gesperrten iPhone, Annahme, bidirektionales Audio, Fehler und Auflegen. Keine Fake-Media-Konfiguration im Netz verwenden.
 4. Audio-Routing bleibt eigene Schicht. Loopback Trial rauscht; BlackHole/Process Tap sind noch nicht gebaut/installiert. Für Dauerbetrieb nicht auf Trial-Rauschen oder manuelle Resets bauen.
 5. Original-Codex-Voice-Autostart ist nicht bewiesen. Ein Telegram-Call bedeutet keine gestartete Codex-Voice-Sitzung. T3-Ereignisse kommen erst nach diesen Nachweisen.

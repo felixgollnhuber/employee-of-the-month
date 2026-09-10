@@ -14,6 +14,7 @@ cc_library(
         "-Ithird-party/webrtc/absl",
         "-DWEBRTC_MAC",
         "-DWEBRTC_INCLUDE_INTERNAL_AUDIO_DEVICE",
+        "-DCODEX_BRIDGE_STRICT_AUDIO",
     ] + platform_shared_flags + arm64_specific_flags + optimization_flags,
     cxxopts = ["-std=c++17"],
     deps = [":webrtc"],
