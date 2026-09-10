@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 import sys
 
-from .config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing
+from .config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing, read_private_json
 from .control import CallSession
 from .native import offline_native_check
 
@@ -66,6 +66,7 @@ def main():
     sub.add_parser("demo", help="Offline start/status/end simulation; no real call")
     config = sub.add_parser("configure", help="Hidden local input only; sends nothing to Telegram")
     config.add_argument("--profile", default="default")
+    config.add_argument("--sender-file", type=Path, help="Private 0600 JSON containing an already confirmed sender_phone; never a phone number on the command line")
     routing = sub.add_parser("configure-audio", help="Choose exact device UIDs locally; no audio or routing is started")
     routing.add_argument("--profile", default="default")
     auth = sub.add_parser("login", help="Explicit Telegram login; MAY REQUEST A LOGIN CODE, never creates accounts or calls")
@@ -85,26 +86,29 @@ def main():
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required; do not paste secrets into task chat")
         print("Nur lokale Speicherung (0600), keine Anmeldung oder SMS-Anforderung.")
+        sender = read_private_json(args.sender_file.parent, args.sender_file.name).get("sender_phone") if args.sender_file else None
         data = {
             "api_id": int(getpass.getpass("Eigene Telegram API-ID: ")),
             "api_hash": getpass.getpass("Eigener API-Hash: "),
-            "sender_phone": getpass.getpass("Bewusst gewählte Absendernummer (+...): "),
-            "target_username": getpass.getpass("Bestätigter Telegram-Zielbenutzer (@...): "),
+            "sender_phone": sender or getpass.getpass("Bewusst gewählte Absendernummer (+...): "),
         }
         write_profile(profile_path(args.profile), data)
         emit({"configured": True, "login_requested": False})
     elif args.command == "preflight":
         try:
-            read_profile(profile_path(args.profile))
+            profile = read_profile(profile_path(args.profile))
             configured = True
+            target_present = bool(profile.get("target_username"))
         except (OSError, ConfigError, ValueError):
             configured = False
+            target_present = False
         try:
             read_routing(profile_path(args.profile))
             routing_present = True
         except Exception:
             routing_present = False
         emit({"configuration_present_and_private": configured,
+              "target_configured": target_present,
               "routing_present_and_private": routing_present,
               "telegram_authenticated": "not_checked_offline", "live_audio_verified": False,
               "original_voice_autostart_verified": False,
@@ -112,7 +116,7 @@ def main():
               "blockers": (["local_account_configuration"] if not configured else []) +
                   (["exact_audio_device_configuration"] if not routing_present else []) + [
                   "authenticated_session_not_checked", "authorized_live_audio_test_required",
-                  "original_voice_start_not_verified"]})
+                  "original_voice_start_not_verified"] + ([] if target_present else ["confirmed_target_required_before_call"])})
         return 2
     elif args.command == "configure-audio":
         if not sys.stdin.isatty():

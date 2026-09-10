@@ -56,6 +56,11 @@ class ConfigTests(unittest.TestCase):
     def test_routing_rejects_same_device(self):
         with self.assertRaises(ConfigError): write_routing(self.path, "same", "same")
 
+    def test_login_profile_does_not_require_a_call_target(self):
+        data = {key: value for key, value in self.fixture.items() if key != "target_username"}
+        write_profile(self.path, data)
+        self.assertEqual(read_profile(self.path), data)
+
 
 if __name__ == "__main__":
     unittest.main()

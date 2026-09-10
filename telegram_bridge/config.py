@@ -23,9 +23,20 @@ def validate(data):
         raise ConfigError("API hash must contain 32 hexadecimal characters")
     if not re.fullmatch(r"\+[1-9][0-9]{6,14}", data.get("sender_phone", "")):
         raise ConfigError("Sender requires an explicitly chosen E.164 phone number")
-    if not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", data.get("target_username", "")):
+    target = data.get("target_username")
+    if target is not None and not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target):
         raise ConfigError("Target requires an explicitly chosen Telegram @username")
-    return {key: data[key] for key in ("api_id", "api_hash", "sender_phone", "target_username")}
+    result = {key: data[key] for key in ("api_id", "api_hash", "sender_phone")}
+    if target is not None:
+        result["target_username"] = target
+    return result
+
+
+def require_target(data):
+    target = data.get("target_username")
+    if not isinstance(target, str) or not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target):
+        raise ConfigError("Confirmed call target is required before dialing")
+    return target
 
 
 def private_directory(path):
