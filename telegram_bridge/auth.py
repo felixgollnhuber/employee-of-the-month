@@ -38,7 +38,7 @@ def auth_request(state, config, database, key, secret_input=getpass.getpass):
     raise AuthGate("Unsupported authentication step; no account created or payment requested")
 
 
-def local_key(profile, secret_input=getpass.getpass):
+def local_key(profile, secret_input=getpass.getpass, notice=print):
     salt_file = profile / "key-salt"
     try:
         fd = os.open(salt_file, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
@@ -54,9 +54,13 @@ def local_key(profile, secret_input=getpass.getpass):
         salt = os.urandom(32)
         with os.fdopen(fd, "wb") as stream:
             stream.write(salt)
-    password = secret_input("Lokale Datenbank-Passphrase (mindestens 16 Zeichen, nicht Telegram-Passwort): ")
-    if len(password) < 16:
-        raise AuthGate("Database passphrase is too short")
+    if (profile / "database").exists():
+        notice("Lokale Datenbank vorhanden: die bisherige Datenbank-Passphrase verwenden. Es wird nichts zurückgesetzt.")
+    while True:
+        password = secret_input("Lokale Datenbank-Passphrase (mindestens 16 Zeichen, nicht Telegram-Passwort): ")
+        if len(password) >= 16:
+            break
+        notice("Passphrase zu kurz: mindestens 16 Zeichen erforderlich. Bitte erneut eingeben; Abbrechen mit Ctrl-C. Noch keine Verbindung zu Telegram gestartet.")
     key = hashlib.scrypt(password.encode(), salt=salt, n=32768, r=8, p=1, maxmem=64 * 1024**2, dklen=32)
     return base64.b64encode(key).decode()
 

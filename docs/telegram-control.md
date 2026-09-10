@@ -1,5 +1,11 @@
 # Telegram-Steuerung: überprüfte Zwischenimplementierung
 
+## Anmeldung nach zu kurzer lokaler Passphrase erneut starten
+
+Wenn die API-Konfiguration bereits erfolgreich gespeichert wurde, **nur `python3 -m telegram_bridge login` erneut ausführen**. `configure` muss nicht wiederholt werden und überspringt bei vorhandener gültiger privater Konfiguration jetzt alle Secret-Eingaben. Es überschreibt nichts.
+
+Die Mindestlängenprüfung der lokalen Datenbank-Passphrase erfolgt vor Datenbankanlage, TDLib-Initialisierung und Codeanforderung. Zu kurze Eingaben führen jetzt zu einem verständlichen Hinweis und erneuter verdeckter Eingabe. Ein bereits angelegtes Salt kann dabei unverändert weiterverwendet werden. Solange noch keine Datenbank existiert, kann eine neue ausreichend lange lokale Passphrase gewählt werden. Bei vorhandener Datenbank weist der Dialog auf die bisherige Passphrase hin; es gibt keinen automatischen Datenbank- oder Telegram-Passwortreset.
+
 ## Aktueller Runtime-Stand
 
 Die native Runtime-Integration ist jetzt implementiert, nicht mehr nur geplant. `telegram_bridge/application.py` komponiert vorhandene authentifizierte Sitzung, kontrollierte Zielauflösung, `LiveCallLoop` und `NativeMedia`. Der Helper `media_runtime` konstruiert einen echten tgcalls-Descriptor und enthält die tatsächlichen Create-/Signaling-/Stop-Aufrufe. Seine Ausführung mit Audio ist doppelt gesperrt: explizite Freigabe am Python-Einstieg und `--allow-audio` im getrennten nativen Prozess. **Aktuell wurden weder Anmeldung noch Call noch Audiostart ausgeführt.**

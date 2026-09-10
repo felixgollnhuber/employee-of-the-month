@@ -83,6 +83,12 @@ def main():
     elif args.command == "demo":
         demo()
     elif args.command == "configure":
+        path = profile_path(args.profile)
+        if (path / "config.json").exists() or (path / "config.json").is_symlink():
+            read_profile(path)  # Validate ownership/permissions and fields without printing them.
+            emit({"configured": True, "unchanged": True, "login_requested": False,
+                  "next_step": "API-Konfiguration bereits vorhanden. Für die Anmeldung nur python3 -m telegram_bridge login ausführen."})
+            return 0
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required; do not paste secrets into task chat")
         print("Nur lokale Speicherung (0600), keine Anmeldung oder SMS-Anforderung.")
@@ -92,7 +98,7 @@ def main():
             "api_hash": getpass.getpass("Eigener API-Hash: "),
             "sender_phone": sender or getpass.getpass("Bewusst gewählte Absendernummer (+...): "),
         }
-        write_profile(profile_path(args.profile), data)
+        write_profile(path, data)
         emit({"configured": True, "login_requested": False})
     elif args.command == "preflight":
         try:
