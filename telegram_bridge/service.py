@@ -62,6 +62,23 @@ class VoiceConversation:
             from .tasks import last_user
             if not last_user(transcript).strip():
                 return 'Begrüße Felix mit dem bekannten Gesprächskontext und frage kurz, woran er anknüpfen möchte. Frühere Zusagen sind keine neue Bestätigung.'
+            from .followups import Followups, parse_followup
+            from .tasks import explicit_confirmation
+            current = last_user(transcript)
+            # Route explicit addressed messages before an attached Ask or proposal.
+            # Any intervening intent invalidates the conversational confirmation slot.
+            if (self.proposal_id and not explicit_confirmation(current)
+                    and current.strip().casefold().rstrip('.!') not in ('nein', 'abbrechen', 'doch nicht')):
+                self.proposal_id = None
+            if parse_followup(current) is not None:
+                self.operation_id = None
+                if hasattr(self, 'prior_transcript'):
+                    del self.prior_transcript
+                expected = self.revision() if revision is None else revision
+                event_id = self.conversation_id + ':' + str(sum(
+                    m.get('role') == 'user' for m in transcript))
+                return Followups(c).handle(current, event_id,
+                    cancelled=lambda: self.cancelled() or self.revision() != expected)
             if self.launcher and self.proposal_id:
                 from .tasks import explicit_confirmation, last_user
                 if explicit_confirmation(last_user(transcript)):

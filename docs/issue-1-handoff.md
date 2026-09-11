@@ -37,3 +37,7 @@ Eine T3-Empfangsbestätigung bedeutet nur, dass eine Nutzereingabe angekommen is
 Auf ausdrücklichen Nutzerauftrag läuft nun ein gemeinsamer LaunchAgent für alle T3-Projekte einschließlich PeakShare. Er ersetzt die einzelnen Wächter. Neue Feature-Aufträge können nach Bestätigung als T3-Threads mit vorgeschlagenem Account, Modell und Reasoning gestartet werden. `service-health.json` und `service-pilot.json` im privaten Profil sind die aktuellen Laufzeitquellen. Die bisherigen Pilotdateien sind als durch den gemeinsamen Dienst abgedeckt gekennzeichnet. Siehe [all-projects-service.md](all-projects-service.md).
 
 Der Dienst besitzt jetzt ein privates `call-history.json` mit laufend gespeicherten Textverläufen und Kontext für Rückrufe. Gespeicherte unbestätigte Vorschläge können unter derselben ID erneut vorgelesen und erst mit einer neuen aktuellen Bestätigung gestartet werden. Ein partieller Verlauf des letzten helth-Gesprächs wurde eindeutig aus T3 wiederhergestellt. Siehe den Abschnitt Kontext beim Rückruf in `all-projects-service.md`.
+
+## Explizite Folgenachrichten an bestehende Threads
+
+Der neue getrennte Versandpfad unterstützt ausdrücklich adressierte Folgenachrichten auch an completed und settled Threads. Eindeutige Titel oder Thread-IDs, offene Rückfragen und dauerhafte Versandreservierungen werden vor der Zustellung geprüft. Formulierungen, Wiederholungsregeln und die Grenzen des Offline-Nachweises stehen in [thread-followups.md](thread-followups.md). Die Implementierung im Entwicklungs-Worktree ändert keine laufende Dienstinstallation.

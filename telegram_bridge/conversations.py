@@ -339,6 +339,13 @@ class Conversations:
         if key in self.data['updates']: return
         self.data['updates'][key] = 'processing'
         self.store.save()  # A crash cannot replay a decision.
+        from .followups import Followups
+        answer = Followups(self).handle(text, 'telegram:' + str(self.data['target_id']) + ':' + str(message['id']))
+        if answer is not None:
+            self.queue_text(answer, reply_to=message['id'])
+            self.data['updates'][key] = 'handled'
+            self.store.save()
+            return
         self.discover(0)
         reply = message.get('reply_to') or {}
         reply_id = reply.get('message_id') if reply.get('chat_id', self.data['target_id']) in (0, self.data['target_id']) else None
