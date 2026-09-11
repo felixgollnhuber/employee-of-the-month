@@ -46,4 +46,8 @@ Mit `--library PFAD` und `--media-runtime PFAD` können vorhandene TDLib-Abhäng
 
 Automatisch und ohne Laufzeitaktionen geprüft: 127 Python-Tests einschließlich der neuen Dialog- und Diensteigenschaften, elf native Descriptor-/IPC-Prüfungen für beide Anrufrichtungen sowie PCM-Callbacks ohne Gerätezugriff.
 
-Noch offen ist ein bewusst gestarteter echter Abnahmelauf: nicht abheben, ablehnen, vor der Entscheidung auflegen, Netzunterbrechung, Antwort während des Aufbaus, Text-Rückfrage mit Erläuterung, Textkorrektur, Rückruf, neuer Statusanruf und fremdes Konto. Dabei tatsächlichen Telegram-Versand, hörbare eingehende Sprache und passende T3-Rückgabe kontrollieren. Die frühere Nutzerbestätigung ausgehender Gespräche belegt diese neuen Abläufe nicht.
+Im gemeinsamen Live-Test wurden die erste Folgenachricht nach offenem Kontaktversuch, eine Text-Rückfrage mit Erläuterung, der eingehende Rückruf, genau eine passende T3-Rückgabe und die gesprochene Auflegebitte sowie ein neuer Statusanruf geprüft. Der Nutzer bestätigte beide Sprachrichtungen, das Auflegen und die Statusauskunft. Details stehen in [evidence.md](evidence.md).
+
+Noch offen sind gezielte Live-Fälle für Ablehnen, Abbruch vor der Entscheidung, Netzunterbrechung, Antwort während des Aufbaus, Textkorrektur, mehrere offene Vorgänge und ein fremdes Konto.
+
+Beim geordneten Ende des Live-Tests blieb eine Statusantwort als `reserved` stehen. Das kontrollierte Leeren und Bestätigen noch ausstehender Versandaufträge vor dem Beenden bleibt ein offener Punkt. Kein automatischer Neuversand eines unklaren Auftrags.

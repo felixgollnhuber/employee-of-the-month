@@ -94,3 +94,24 @@ Der neue `serve-t3`-Dienst wurde mit 127 Python-Tests geprüft. Neue Fälle deck
 Die geänderte `native/media_runtime.cpp` wurde in `.build/issue-1-native/` neu kompiliert und gegen bereits vorhandene, unveränderte Bibliotheken des separaten Laufzeit-Worktrees gelinkt. Die dort laufende Anwendung und ihr Binary wurden nicht ersetzt. `scripts/check-media-runtime.py --executable .build/issue-1-native/media_runtime` besteht elf echte native Descriptor-/IPC-Prüfungen, einschließlich eingehender Verschlüsselungsrichtung. Der PCM-Selbsttest meldet `pcm_callbacks_verified=true`, `audio_devices_opened=false` und `call_created=false`.
 
 Es wurden keine echten Telegram-Nachrichten, Anrufe, API-Sprachsitzungen oder T3-Entscheidungen für diese neue Abnahme ausgelöst. Die verbleibenden Live-Fälle stehen in [telegram-service.md](telegram-service.md).
+
+## Issue #1: Gemeinsamer Live-Test am 11. September 2026
+
+Der Nutzer hat den Live-Test ausdrücklich beauftragt. Der dokumentierte eigene Projektwächter wurde nach Prüfung von PID, Kommandozeile und freier Profilsitzung gezielt gestoppt. Anschließend startete der neue Dienst mit der separat gebauten Medienlaufzeit für höchstens 20 Minuten und genau einen automatischen ausgehenden Kontaktversuch. Eine eigene T3-Testaufgabe fragte nach CSV oder PDF für einen fiktiven Wochenbericht; es wurden keine Produktiventscheidungen verwendet.
+
+Beobachtet und bestätigt:
+
+- Der erste ausgehende Kontaktversuch endete ohne Klärung. Telegram bestätigte den Versand genau einer ersten Folgenachricht.
+- Die Telegram-Rückfrage „Welcher Bericht ist gemeint“ erhielt die passende Erläuterung. Die Formatentscheidung blieb offen und wurde nicht fälschlich an T3 zurückgegeben.
+- Ein echter eingehender Rückruf startete GPT-Live 1 mit Cedar und wurde derselben Vorgangs-ID zugeordnet. Der gespeicherte Textkontext war damit im Folgedialog verfügbar.
+- Die im Rückruf bestätigte Entscheidung PDF wurde genau einmal an die passende T3-Rückfrage zurückgegeben. Der Quellthread meldete genau ein `user-input.resolved`, keine offene Rückfrage und den abgeschlossenen Turn mit „Gewähltes Format: PDF.“
+- Die gesprochene Auflegebitte wurde erkannt. Die API bestätigte das Schließen; im Gespräch wurden 1795840 Eingangs-PCM-Bytes und 1673600 Ausgangs-PCM-Bytes verarbeitet. Der Kontakt endete in `ended`.
+- Der Nutzer bestätigte ausdrücklich, dass beide Sprachrichtungen verständlich waren und das Auflegen wie gewünscht funktionierte.
+
+Ein zweiter echter eingehender Anruf fragte anschließend nach dem Status. Der Backend-Koordinator meldete korrekt: Die Formatentscheidung PDF ist bestätigt, ein Bericht wurde im Test nicht erstellt. Der Nutzer bestätigte ausdrücklich die korrekte und verständliche Statusauskunft. Auch dieser Anruf endete nach erkannter Auflegebitte mit bestätigtem Schließen der API; es wurden 3195840 Eingangs-PCM-Bytes und 3065600 Ausgangs-PCM-Bytes verarbeitet.
+
+Der Projektumfang enthielt auch den Arbeits-Thread: Die dort gestellte Abnahmefrage wurde während des Statusgesprächs als eigener Vorgang erkannt und erhielt eine zusätzliche Folgenachricht. Sie gehört nicht zur Testbericht-Frage. Für künftige Tests empfiehlt sich deshalb ein eigenes T3-Testprojekt. Eine weitere Statusantwort blieb beim geordneten Dienstende im Versandzustand `reserved`; ihre Zustellung ist nicht bestätigt und sie wurde nicht erneut gesendet. Dies bleibt ein offener Punkt für das Leeren der Versandwarteschlange beim Beenden.
+
+Der Testdienst wurde beendet und beide Profilsperren wurden freigegeben. Der vorherige Projektwächter wurde mit neuer dokumentierter PID, unveränderten Kontaktgrenzen und der verbleibenden Laufzeit bis zum ursprünglich geplanten Endzeitpunkt wiederhergestellt. Sein Start wurde zurückgelesen.
+
+Diese Beobachtungen belegen den gemeinsamen Hauptablauf einschließlich neuem Statusanruf. Netzverlust, Zugriff durch ein fremdes Konto, Telegram-Korrekturen und mehrere gleichzeitig offene Fachvorgänge wurden in diesem Live-Lauf noch nicht gezielt geprüft; hierfür bestehen weiterhin die Offline-Tests. Private IDs, Zugangsdaten und Gesprächslogs verbleiben im lokalen Profil.

@@ -16,7 +16,7 @@ Issue: https://github.com/felixgollnhuber/codex-phone-bridge/issues/1
 
 `serve-t3` ergänzt Telegram-Folgenachrichten, mehrteilige Textdialoge, Rückrufe und eingehende Statusanrufe. Vorgänge und Versandzustand werden privat und dauerhaft gespeichert. Der gemeinsame Dienst hält `watch.lock` und `session.lock` und übernimmt bekannte Kontaktversuche des bisherigen Wächters. Verhalten, Start und Fehlerfälle stehen in [telegram-service.md](telegram-service.md).
 
-Die Implementierung wurde mit 127 Offline-Tests, elf nativen Descriptor-/IPC-Prüfungen und dem nativen PCM-Selbsttest geprüft. Eine neue native Laufzeit wurde separat kompiliert und gelinkt. Der vorhandene Wächter und seine Laufzeit wurden nicht verändert oder gestoppt. Die echte Abnahme der neuen Nachrichten- und eingehenden Audioabläufe bleibt offen; Issue #1 ist deshalb noch nicht vollständig live abgenommen.
+Die Implementierung wurde mit 127 Offline-Tests, elf nativen Descriptor-/IPC-Prüfungen und dem nativen PCM-Selbsttest geprüft. Eine neue native Laufzeit wurde separat kompiliert und gelinkt. Im anschließend ausdrücklich beauftragten Live-Test wurden Folgenachricht, Text-Rückfrage, eingehender Rückruf, eindeutige T3-Rückgabe und Auflegen gemeinsam geprüft. Auch ein neuer Statusanruf wurde geprüft. Der Nutzer bestätigte Verständlichkeit, Auflegen und Statusauskunft. Der eigene Wächter wurde dafür gezielt pausiert und nach dem Test bis zum ursprünglichen Endzeitpunkt wiederhergestellt; seine native Laufzeit blieb unverändert. Eine beim Dienstende noch unbestätigte Statusnachricht zeigt einen offenen Punkt beim Leeren der Versandwarteschlange. Die noch offenen Live-Fälle und die genaue Evidenz stehen in [evidence.md](evidence.md).
 
 ## Laufzeit und Entwicklungsstand
 
