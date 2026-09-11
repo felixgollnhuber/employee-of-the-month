@@ -42,7 +42,7 @@ Ein einzelnes Gespräch ist auf ausdrücklichen Nutzerwunsch auf 1200 Sekunden (
 
 ## Nachweise
 
-- 154 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
+- 156 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
 - Gegen echtes T3 wurde ein synthetischer Auftrag in einem eigenen Git-Testprojekt gestartet. Mit der vorgeschlagenen Provider-/Modellauswahl entstand eine Begrüßungsfunktion samt unittest; der Test wurde unabhängig erneut erfolgreich ausgeführt. Dieser Nachweis belegt den echten Thread-/Implementierungspfad, nicht die sprachliche Erkennung eines neuen Feature-Auftrags.
 - Die zuvor gemeinsam geprüften echten Telegram-Dialoge, Rückrufe, Statusanrufe und Auflegebitten bleiben in [evidence.md](evidence.md) dokumentiert.
 
@@ -61,3 +61,5 @@ Gespeichert werden höchstens acht Gesprächsverläufe mit jeweils maximal 24000
 Ein neuer Gesprächskoordinator kann mit diesem Kontext anknüpfen. Bestehende T3-Arbeits-Threads bleiben unabhängig vom Telefonat erhalten. Offene Ask-Vorgänge behalten ihre Zuordnung. Ein unbestätigter Feature-Vorschlag kann über seine bestehende ID wieder aufgegriffen werden; der Agent liest Projekt, Auftrag und Modellauswahl erneut vor. Erst eine neue Bestätigung im aktuellen Anruf startet den vorgesehenen Arbeits-Thread. Historische Ja-Aussagen oder eine Begrüßung lösen keinen Start aus.
 
 Für den ersten Anruf nach dieser Erweiterung wurde ein eindeutig über die Vorschlags-ID zuordenbarer Teil des vorherigen helth-Gesprächs aus dem T3-Koordinatorverlauf wiederhergestellt. Dieser Datensatz ist als teilweise wiederhergestellter Verlauf gekennzeichnet. Der echte helth-Auftrag wurde dabei weder bestätigt noch gestartet.
+
+Klare Startbestätigungen wie „Ja, mach“ werden ebenfalls angenommen. Wird ein noch offener Vorschlag durch eine neue Modell- oder Auftragsvariante ersetzt, erscheint die alte Variante nicht mehr als aktiver Vorschlag.

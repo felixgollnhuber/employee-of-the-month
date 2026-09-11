@@ -163,6 +163,14 @@ Ein partieller Verlauf des vorherigen echten helth-Gesprächs wurde über die ei
 
 Der feste Release wurde aktiviert. Die Zustandsmeldung zeigt 19 Projekte, `call_limit_seconds=1200`, einen verfügbaren vorherigen Gesprächskontext und keinen Journal- oder Backend-Fehler. Ein tatsächlicher gesprochener Rückruf mit dieser Erweiterung wurde in diesem Prüflauf nicht durchgeführt.
 
+## Bestätigungsfehler „Ja, mach“ und nachgeholter Auftrag
+
+Bei einem echten Sprachauftrag zum automatischen Setteln technischer Gesprächskoordinatoren akzeptierte der Parser die klare Aussage „Ja, mach“ nicht. Der Koordinator leitete deshalb in eine erneute Vorschlagsaufnahme um. Der Sprachagent kündigte dennoch einen Start an. Im Ledger blieb der Auftrag `proposed`; es gab weder einen Create-/Start-Command noch eine Ablehnung durch T3.
+
+Der Parser akzeptiert jetzt auch „Ja, mach“, „Ja, mach bitte“ und „Mach es“. Negationen und Einschränkungen wie „Ja, mach aber mit Claude“ bleiben von einer reinen Bestätigung ausgeschlossen. Beim Ersetzen eines noch offenen Vorschlags wird die alte Variante als überholt markiert und nicht weiterhin als aktiver Vorschlag angeboten. 156 Offline-Tests bestehen.
+
+Der konkrete bereits gesprochene Auftrag wurde anhand des ursprünglichen Koordinatortranskripts und der dazugehörigen Vorschlagsrevision rekonstruiert. Der vorherige Zustand wurde privat gesichert. Nach Prüfung, dass für die reservierte Arbeits-Thread-ID noch kein Thread existierte, wurde ausschließlich der zuletzt gewählte Auftrag mit Claude Fable 5.1, High und 1M Kontext gestartet. Die vorherigen Modellvarianten desselben Auftrags wurden als überholt markiert. Der neue Arbeits-Thread verwendet einen eigenen Git-Worktree. T3 meldete einen laufenden Turn, einen laufenden Claude-Provider ohne Fehler sowie tatsächlich gestartete Werkzeugaufrufe. Dies belegt den nachgeholten Start, noch nicht die fertige Implementierung des Settled-Features.
+
 ## Automatischer Settled-Status der Koordinations-Threads
 
 Auf im Sprachgespräch bestätigten Auftrag setteln beendete Telefongespräche ihre Koordinations-Threads über den T3-Befehl `thread.settle`. Der Befehl, seine Ablehnungsregeln, das idempotente Re-Emit für bereits gesettelte Threads, die dauerhafte Ablehnung einer einmal abgelehnten Command-ID und das serverseitige Aufwecken bei neuer Aktivität wurden in der lokalen T3-Quelle `t3code` (Revision `a04198127`, `packages/contracts/src/orchestration.ts`, `apps/server/src/orchestration/decider.ts`, `Layers/OrchestrationEngine.ts`) nachgelesen. Der Servercode wurde nicht verändert.
