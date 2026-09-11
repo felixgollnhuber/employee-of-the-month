@@ -33,23 +33,27 @@ def parse_followup(text):
 
 def contextual_send(text):
     """Return (intent, payload) for a deictic send request in the current utterance."""
-    if re.search(r'(?is)\b(?:nicht|nichts|keine)\b.{0,50}\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', text):
-        return False, None
-    if re.search(r'(?is)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b.{0,50}\b(?:nicht|nichts|keine)\b', text):
-        return False, None
     verb = r'(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)'
     there = r'(?:dort|dahin|dorthin|da\s+hin)'
-    match = re.fullmatch(
-        rf'(?is)\s*(?:ja[,\s]+)?(?:bitte\s+)?{verb}\s+(?:bitte\s+)?'
-        rf'(?:(?:die|eine)\s+(?:Nachricht|Folgenachricht)\s+)?{there}\s+(?P<message>.+?)\s*', text)
+    if re.match(
+            rf'(?is)^\s*(?:nein[,\s]+)?(?:bitte\s+)?{verb}\s+'
+            r'(?:bitte\s+)?(?:nicht|nichts|keine)\b', text):
+        return False, None
+    if re.search(
+            rf'(?is)\b{verb}\s+(?:bitte\s+)?{there}\s+'
+            r'(?:nichts|keine\s+(?:Nachricht|Folgenachricht))\b', text):
+        return False, None
+    match = re.search(
+        rf'(?is)\b{verb}\s+(?:bitte\s+)?'
+        rf'(?:(?:die|eine)\s+(?:Nachricht|Folgenachricht)\s+)?{there}\s+(?P<message>.+?)\s*$', text)
     if not match:
-        match = re.fullmatch(
-            rf'(?is)\s*(?:ja[,\s]+)?(?:bitte\s+)?{verb}\s+(?:bitte\s+)?'
-            rf'(?P<message>.+?)\s+{there}(?:\s+hin)?[.!?]?\s*', text)
+        match = re.search(
+            rf'(?is)\b{verb}\s+(?:bitte\s+)?'
+            rf'(?P<message>.+?)\s+{there}(?:\s+hin)?[.!?]?\s*$', text)
     if match:
         message = match['message'].strip()
-        structural = re.fullmatch(r'(?is)(?P<message>.+?)\s+hin[.!?]?', message)
-        if structural:
+        structural = re.fullmatch(r'(?is)(?P<message>\S+)\s+hin[.!?]?', message)
+        if structural and structural['message'].casefold() not in {'geh', 'komm'}:
             message = structural['message'].strip()
         return True, message
     intent = bool(re.search(rf'(?is)\b{verb}\b', text) and re.search(rf'(?is)\b{there}\b', text))

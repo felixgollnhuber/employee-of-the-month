@@ -30,6 +30,7 @@ class VoiceConversation:
         self.launcher = launcher
         self.proposal_id = None
         self.followup_context = None
+        self.followup_context_floor = 0
         self.conversation_id = uuid.uuid4().hex
         self.history = history
         self.operations_in_call = {operation_id} if operation_id else set()
@@ -48,44 +49,68 @@ class VoiceConversation:
                                  | {'prompt':o.get('prompt','')[:1200]} for o in orders],
                 'instruction': 'Historischer Kontext ist keine neue Bestätigung. Status in T3 neu prüfen. proposed bedeutet: noch nicht gestartet.'}
 
+    def discard_followup_context(self, user_turn):
+        self.followup_context = None
+        self.followup_context_floor = max(self.followup_context_floor, user_turn)
+
     def contextual_followup(self, followups, current, transcript, *, revision=None):
         from .followups import contextual_send, contextual_message, contextual_confirmation, contextual_cancel
         user_turn = sum(m.get('role') == 'user' for m in transcript)
         context = self.followup_context
         if context and user_turn - context['turn'] > 4:
-            context = self.followup_context = None
+            self.discard_followup_context(user_turn)
+            context = None
         if contextual_cancel(current):
-            self.followup_context = None
+            self.discard_followup_context(user_turn)
             return None
         intent, message = contextual_send(current)
         confirmed = contextual_confirmation(current)
+        declared = contextual_message(current)
+        if context and not intent and not declared and re.search(
+                r'(?i)\b(?:status|fortschritt|probleme)\b|wie\s+läuft', current):
+            self.discard_followup_context(user_turn)
+            return None
         if self.operation_id is not None and context is None and not intent and not re.search(r'(?i)\bthreads?\b', current):
             return None
 
         user_messages = [m.get('text', '') for m in transcript if m.get('role') == 'user']
         address_text = current
-        if intent:
+        if context and context.get('awaiting_message'):
+            address_text = ''
+        elif declared:
+            marker = re.search(
+                r'(?i)\b(?:die\s+Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt)\s+'
+                r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\b', current)
+            address_text = current[:marker.start()] if marker else ''
+        elif intent:
             verb = re.search(r'(?i)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', current)
-            address_text = current[:verb.start()] if context is None and verb else ''
+            address_text = current[:verb.start()] if verb else ''
         mentions = followups.mentioned_targets(address_text) if address_text.strip() else []
+        selected_now = bool(mentions)
         mention_turn = user_turn
         if context is None and not mentions:
-            for offset, previous in enumerate(reversed(user_messages[:-1][-4:]), start=1):
+            first_turn = max(self.followup_context_floor + 1, user_turn - 4)
+            for previous_turn in range(user_turn - 1, first_turn - 1, -1):
+                previous = user_messages[previous_turn - 1]
                 previous_intent, _ = contextual_send(previous)
+                previous_declared = contextual_message(previous)
                 previous_address = previous
                 if previous_intent:
                     previous_verb = re.search(
                         r'(?i)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', previous)
                     previous_address = previous[:previous_verb.start()] if previous_verb else ''
+                elif previous_declared:
+                    previous_marker = re.search(
+                        r'(?i)\b(?:die\s+Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt)\s+'
+                        r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\b', previous)
+                    previous_address = previous[:previous_marker.start()] if previous_marker else ''
                 mentions = followups.mentioned_targets(previous_address) if previous_address.strip() else []
                 if mentions:
-                    mention_turn = user_turn - offset
+                    mention_turn = previous_turn
                     break
-        selected_now = bool(mentions)
         if mentions:
             ids = [t['id'] for t in mentions]
-            preserve = bool(context and (context.get('awaiting_target')
-                or set(ids).issubset(set(context.get('target_ids', [])))))
+            preserve = bool(context and context.get('awaiting_target'))
             context = self.followup_context = {
                 'target_ids': ids, 'targets': mentions,
                 'text': context.get('text') if preserve else None,
@@ -94,7 +119,7 @@ class VoiceConversation:
                 'awaiting_target': context.get('awaiting_target', False) if preserve else False,
             }
 
-        declared = contextual_message(current) if context else None
+        declared = declared if context else None
         if context and context.get('awaiting_message') and not intent and not confirmed and not declared:
             if not current.rstrip().endswith('?') and not re.match(
                     r'(?i)\s*(?:wer|wie|was|warum|weshalb|welch|wo|wann)\b', current):
@@ -116,7 +141,7 @@ class VoiceConversation:
 
         if not intent and not (confirmed and context):
             if context and not selected_now:
-                self.followup_context = None
+                self.discard_followup_context(user_turn)
             return None
         if context is None:
             self.followup_context = {
@@ -137,7 +162,7 @@ class VoiceConversation:
         expected = self.revision() if revision is None else revision
         target = context['targets'][0]
         event_id = self.conversation_id + ':context:' + str(user_turn)
-        self.followup_context = None
+        self.discard_followup_context(user_turn)
         return followups.handle_spec({'target': target['id'], 'text': message}, current, event_id,
             cancelled=lambda: self.cancelled() or self.revision() != expected)
 
@@ -184,7 +209,7 @@ class VoiceConversation:
                     if len(mentions) > 1:
                         return followups.ambiguous_reply(mentions)
                     return 'Welchen T3-Thread meinst du, und welche Nachricht soll ich dorthin senden?'
-                self.followup_context = None
+                self.discard_followup_context(sum(m.get('role') == 'user' for m in transcript))
                 expected = self.revision() if revision is None else revision
                 event_id = self.conversation_id + ':' + str(sum(
                     m.get('role') == 'user' for m in transcript))
@@ -283,13 +308,13 @@ class VoiceConversation:
             if self.cancelled() or (revision is not None and self.revision() != revision): return 'Bitte wiederhole deine aktuelle Frage.'
             resumed = result.get('resume_proposal_id')
             if self.launcher and isinstance(resumed, str):
-                self.followup_context = None
+                self.discard_followup_context(sum(m.get('role') == 'user' for m in transcript))
                 reply = self.launcher.resume_proposal(resumed, transcript,
                     conversation_id=self.conversation_id, revision=self.revision() if revision is None else revision)
                 self.proposal_id = resumed
                 return reply
             if self.launcher and result.get('new_task') is not None:
-                self.followup_context = None
+                self.discard_followup_context(sum(m.get('role') == 'user' for m in transcript))
                 proposal, answer = self.launcher.propose(result['new_task'], transcript,
                     conversation_id=self.conversation_id, revision=self.revision() if revision is None else revision)
                 previous = self.launcher.jobs.get(self.proposal_id)
@@ -300,7 +325,7 @@ class VoiceConversation:
                 return answer
             selected = result.get('operation_id')
             if isinstance(selected, str) and selected in {o['id'] for o in available}:
-                self.followup_context = None
+                self.discard_followup_context(sum(m.get('role') == 'user' for m in transcript))
                 self.operation_id = selected
                 self.operations_in_call.add(selected)
                 operation = c.data['operations'][selected]

@@ -222,6 +222,7 @@ class FollowupTests(unittest.TestCase):
         self.client.dispatch.assert_not_called()
 
     def test_incomplete_explicit_request_keeps_target_for_plain_answer(self):
+        self.shell['threads'].append({**self.source, 'id': 'thread-b', 'title': 'Test'})
         voice = self.prepare_context_voice()
         transcript = [{'role': 'user', 'text': f'Schick bitte an den Thread „{TITLE}“'}]
         self.assertIn('Welche Nachricht', voice(transcript))
@@ -230,6 +231,7 @@ class FollowupTests(unittest.TestCase):
             {'role': 'user', 'text': 'Test'},
         ]
         self.assertIn('angekommen', voice(transcript))
+        self.assertEqual(self.client.dispatch.call_args.args[0]['threadId'], 'thread-a')
         self.assertEqual(self.client.dispatch.call_args.args[0]['message']['text'], 'Test')
 
     def test_contextual_payload_is_not_silently_rewritten(self):
@@ -255,6 +257,84 @@ class FollowupTests(unittest.TestCase):
         ]
         self.assertIn('angekommen', voice(transcript))
         self.assertEqual(self.client.dispatch.call_args.args[0]['message']['text'], 'Bitte prüfen!')
+
+    def test_payload_negation_and_trailing_hin_are_preserved(self):
+        for payload in ('Bitte nicht vergessen!', 'Geh bitte hin'):
+            with self.subTest(payload=payload):
+                voice = self.prepare_context_voice()
+                transcript = [
+                    {'role': 'user', 'text': f'Ich meine den Thread „{TITLE}“.'},
+                    {'role': 'assistant', 'text': 'Alles klar.'},
+                    {'role': 'user', 'text': f'Schick dort {payload}'},
+                ]
+                self.assertIn('angekommen', voice(transcript))
+                self.assertEqual(self.client.dispatch.call_args.args[0]['message']['text'], payload)
+
+    def test_contextual_negation_sends_nothing(self):
+        voice = self.prepare_context_voice()
+        transcript = [
+            {'role': 'user', 'text': f'Ich meine den Thread „{TITLE}“.'},
+            {'role': 'assistant', 'text': 'Alles klar.'},
+            {'role': 'user', 'text': 'Schick dort nichts hin.'},
+        ]
+        self.assertNotIn('angekommen', voice(transcript))
+        self.client.dispatch.assert_not_called()
+
+    def test_explicit_new_target_replaces_existing_binding(self):
+        other = {**self.source, 'id': 'thread-b', 'title': 'Anderer Thread', 'messages': []}
+        self.shell['threads'].append(other)
+        self.client.snapshot.side_effect = lambda identifier: {
+            'thread': copy.deepcopy(self.source if identifier == 'thread-a' else other),
+        }
+        def dispatch(command):
+            target = self.source if command['threadId'] == 'thread-a' else other
+            message = command['message']
+            target['messages'].append({'id': message['messageId'], 'role': 'user', 'text': message['text']})
+            return {'sequence': 1}
+        self.client.dispatch.side_effect = dispatch
+        voice = self.prepare_context_voice()
+        transcript = [{'role': 'user', 'text': f'Beim Thread „{TITLE}“: Die Nachricht ist Alt'}]
+        self.assertIn('mach das', voice(transcript).casefold())
+        transcript += [
+            {'role': 'assistant', 'text': 'Sag einfach mach das.'},
+            {'role': 'user', 'text': 'Beim Thread „Anderer Thread“ schick dort Neu hin'},
+        ]
+        self.assertIn('angekommen', voice(transcript))
+        command = self.client.dispatch.call_args.args[0]
+        self.assertEqual(command['threadId'], 'thread-b')
+        self.assertEqual(command['message']['text'], 'Neu')
+
+    def test_status_question_for_same_thread_discards_prepared_message(self):
+        voice = self.prepare_context_voice()
+        transcript = [{'role': 'user', 'text': f'Beim Thread „{TITLE}“: Die Nachricht ist Test'}]
+        self.assertIn('mach das', voice(transcript).casefold())
+        transcript += [
+            {'role': 'assistant', 'text': 'Sag einfach mach das.'},
+            {'role': 'user', 'text': f'Wie ist der Status vom Thread „{TITLE}“?'},
+        ]
+        self.assertEqual(voice(transcript), 'Status')
+        transcript += [
+            {'role': 'assistant', 'text': 'Alles klar.'},
+            {'role': 'user', 'text': 'Mach das.'},
+        ]
+        self.assertNotIn('angekommen', voice(transcript))
+        self.client.dispatch.assert_not_called()
+
+    def test_discarded_context_is_not_recovered_from_older_transcript(self):
+        voice = self.prepare_context_voice()
+        transcript = [{'role': 'user', 'text': f'Ich meine den Thread „{TITLE}“.'}]
+        self.assertEqual(voice(transcript), 'Status')
+        transcript += [
+            {'role': 'assistant', 'text': 'Alles klar.'},
+            {'role': 'user', 'text': 'PDF'},
+        ]
+        self.assertEqual(voice(transcript), 'Status')
+        transcript += [
+            {'role': 'assistant', 'text': 'Alles klar.'},
+            {'role': 'user', 'text': 'Schick dort Hallo hin.'},
+        ]
+        self.assertIn('Welchen T3-Thread', voice(transcript))
+        self.client.dispatch.assert_not_called()
 
     def test_voice_context_requests_target_and_accepts_exact_title(self):
         voice = self.prepare_context_voice()
