@@ -1,4 +1,4 @@
-.PHONY: build fixture check telegram-check telegram-native telegram-media telegram-runtime
+.PHONY: build fixture check telegram-check telegram-native telegram-media telegram-runtime live-deps keychain-helper
 
 build: .build/AudioBridgeTest
 
@@ -27,3 +27,14 @@ telegram-media:
 
 telegram-runtime: telegram-media
 	python3 scripts/check-media-runtime.py
+	.build/vendor/telegram-ios/bazel-bin/bridge_probe/media_runtime --pcm-self-test
+
+live-deps:
+	python3 -m venv .build/live-venv
+	.build/live-venv/bin/python -m pip install -r requirements-live.txt
+
+keychain-helper: .build/KeychainStore
+
+.build/KeychainStore: Sources/KeychainStore.swift
+	mkdir -p .build
+	swiftc Sources/KeychainStore.swift -o .build/KeychainStore

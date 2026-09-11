@@ -10,6 +10,13 @@ import json
 from .control import GateError
 
 SUPPORTED_VERSION = "12.0.0"
+PCM_INPUT = "phonebridge.pcm.to-telegram"
+PCM_OUTPUT = "phonebridge.pcm.from-telegram"
+
+
+def normalize_pcm_ready(ready):
+    # Logical endpoints implemented by our in-memory ADM, never CoreAudio UIDs.
+    return {**normalize_ready(ready, PCM_INPUT, PCM_OUTPUT), "audio_mode": "pcm16"}
 
 
 def decode_bytes(value, size=None):

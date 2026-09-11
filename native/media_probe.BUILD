@@ -27,7 +27,7 @@ cc_library(
 
 cc_binary(
     name = "media_runtime",
-    srcs = ["media_runtime.cpp"],
+    srcs = ["media_runtime.cpp", "pcm_audio.cpp", "pcm_audio.h"],
     copts = [
         "-Isubmodules/TgVoipWebrtc/tgcalls",
         "-Isubmodules/TgVoipWebrtc/tgcalls/tgcalls",

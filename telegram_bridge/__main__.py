@@ -4,9 +4,10 @@ import json
 from pathlib import Path
 import sys
 
-from .config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing, read_private_json
+from .config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing, read_private_json, write_target
 from .control import CallSession
 from .native import offline_native_check
+from .keychain import keychain_configured
 
 
 def emit(value):
@@ -57,7 +58,7 @@ def demo():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Original-Voice Telegram bridge: offline control implementation")
+    parser = argparse.ArgumentParser(description="Telegram-Gespräche mit GPT-Live 1 und T3-Rückfragen")
     sub = parser.add_subparsers(dest="command", required=True)
     native = sub.add_parser("native-check", help="Load TDLib; no login, network setup or audio")
     native.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
@@ -67,13 +68,48 @@ def main():
     config = sub.add_parser("configure", help="Hidden local input only; sends nothing to Telegram")
     config.add_argument("--profile", default="default")
     config.add_argument("--sender-file", type=Path, help="Private 0600 JSON containing an already confirmed sender_phone; never a phone number on the command line")
+    live_config = sub.add_parser("configure-live", help="Hidden local OpenAI project key input; no API request")
+    live_config.add_argument("--profile", default="default")
+    target = sub.add_parser("configure-target", help="Save the confirmed recipient locally; no login, lookup or call")
+    target.add_argument("--profile", default="default")
     routing = sub.add_parser("configure-audio", help="Choose exact device UIDs locally; no audio or routing is started")
     routing.add_argument("--profile", default="default")
     auth = sub.add_parser("login", help="Explicit Telegram login; MAY REQUEST A LOGIN CODE, never creates accounts or calls")
     auth.add_argument("--profile", default="default")
     auth.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    remember = sub.add_parser("remember-login", help="Verify existing database and save its derived key in macOS Keychain")
+    remember.add_argument("--profile", default="default")
+    remember.add_argument("--passphrase-dialog", action="store_true")
+    remember.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
     preflight = sub.add_parser("preflight", help="Report local readiness without opening a session")
     preflight.add_argument("--profile", default="default")
+    ring = sub.add_parser("ring-test", help="One real Telegram call; ends on answer or timeout, no audio")
+    ring.add_argument("--profile", default="default")
+    ring.add_argument("--allow-call", action="store_true")
+    ring.add_argument("--seconds", type=int, default=20, choices=range(1, 31))
+    ring.add_argument("--passphrase-dialog", action="store_true", help="Hidden local macOS passphrase dialog")
+    ring.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    ring.add_argument("--probe", type=Path, default=Path(".build/vendor/telegram-ios/bazel-bin/bridge_probe/media_probe"))
+    voice = sub.add_parser("voice-test", help="One real Telegram conversation with billed GPT-Live 1; no macOS audio devices")
+    voice.add_argument("--profile", default="default")
+    voice.add_argument("--allow-call", action="store_true")
+    voice.add_argument("--seconds", type=int, default=120, choices=range(1, 181))
+    voice.add_argument("--passphrase-dialog", action="store_true")
+    voice.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    voice.add_argument("--t3-thread", help="Source T3 thread containing a pending question")
+    voice.add_argument("--t3-request", help="Exact pending T3 user-input request ID")
+    voice.add_argument("--context-file", type=Path, help="Optional selected task context, maximum 12000 characters")
+    watch = sub.add_parser("watch-t3", help="Bounded project watcher; call once per pending T3 question")
+    watch.add_argument("--profile", default="default")
+    watch.add_argument("--project-id", required=True)
+    watch.add_argument("--allow-calls", action="store_true")
+    watch.add_argument("--max-calls", type=int, default=1)
+    watch.add_argument("--watch-seconds", type=int, default=900)
+    watch.add_argument("--seconds", type=int, default=120)
+    watch.add_argument("--question-delay-seconds", type=int, default=180,
+                       help="Wait after a question is created before calling (default: 180)")
+    watch.add_argument("--passphrase-dialog", action="store_true")
+    watch.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
     args = parser.parse_args()
     if args.command == "native-check":
         emit(offline_native_check(args.library))
@@ -100,30 +136,32 @@ def main():
         }
         write_profile(path, data)
         emit({"configured": True, "login_requested": False})
+    elif args.command == "configure-target":
+        if not sys.stdin.isatty():
+            raise ConfigError("Interactive terminal required")
+        path = profile_path(args.profile)
+        read_profile(path)
+        username = getpass.getpass("Telegram-@Benutzername des persönlichen Empfängerkontos: ").strip()
+        changed = write_target(path, username)
+        emit({"target_configured": True, "unchanged": not changed,
+              "login_requested": False, "calls_started": 0})
     elif args.command == "preflight":
-        try:
-            profile = read_profile(profile_path(args.profile))
-            configured = True
-            target_present = bool(profile.get("target_username"))
-        except (OSError, ConfigError, ValueError):
-            configured = False
-            target_present = False
-        try:
-            read_routing(profile_path(args.profile))
-            routing_present = True
-        except Exception:
-            routing_present = False
-        emit({"configuration_present_and_private": configured,
-              "target_configured": target_present,
-              "routing_present_and_private": routing_present,
-              "telegram_authenticated": "not_checked_offline", "live_audio_verified": False,
-              "original_voice_autostart_verified": False,
-              "ready_for_live_call": False,
-              "blockers": (["local_account_configuration"] if not configured else []) +
-                  (["exact_audio_device_configuration"] if not routing_present else []) + [
-                  "authenticated_session_not_checked", "authorized_live_audio_test_required",
-                  "original_voice_start_not_verified"] + ([] if target_present else ["confirmed_target_required_before_call"])})
-        return 2
+        from .preflight import offline_preflight
+        status=offline_preflight(profile_path(args.profile))
+        emit(status)
+        return 0 if status["ready_for_call_attempt"] else 2
+    elif args.command == "configure-live":
+        from .config import write_private_json
+        path=profile_path(args.profile)
+        if (path/"live.json").exists() or (path/"live.json").is_symlink():
+            read_private_json(path,"live.json")
+            emit({"live_key_configured":True,"unchanged":True})
+        else:
+            if not sys.stdin.isatty(): raise ConfigError("Interactive terminal required")
+            key=getpass.getpass("OpenAI-Projekt-API-Key (nur lokal): ")
+            if not key.startswith("sk-") or len(key)<30: raise ConfigError("Invalid OpenAI key format")
+            write_private_json(path,"live.json",{"api_key":key})
+            emit({"live_key_configured":True,"api_called":False})
     elif args.command == "configure-audio":
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required")
@@ -141,6 +179,61 @@ def main():
             raise ConfigError("Invalid device direction")
         write_routing(profile_path(args.profile), choices[a]["uid"], choices[b]["uid"])
         emit({"routing_configured": True, "audio_opened": False, "routes_changed": False})
+    elif args.command == "voice-test":
+        if not args.allow_call:
+            raise ConfigError("Explicit --allow-call required")
+        if not args.passphrase_dialog and not sys.stdin.isatty() and not keychain_configured(profile_path(args.profile)):
+            raise ConfigError("Interactive terminal or local passphrase dialog required")
+        from .application import run_authorized_live_test, instructions_for_handoff
+        from .ringing import macos_passphrase
+        delegate = None
+        instructions = None
+        if bool(args.t3_thread) != bool(args.t3_request) or (args.context_file and not args.t3_thread):
+            raise ConfigError("Both T3 thread and request ID are required")
+        if args.t3_thread:
+            from .t3 import T3Client, T3Delegation
+            context = None
+            if args.context_file:
+                with args.context_file.open() as stream: context = stream.read(12001)
+            delegate = T3Delegation(T3Client.from_profile(profile_path(args.profile)), args.t3_thread,
+                                    args.t3_request, context=context, emit=emit)
+            instructions = instructions_for_handoff(delegate.packet)
+        result = run_authorized_live_test(profile_path(args.profile), args.library,
+            authorized=True, max_seconds=args.seconds,
+            secret_input=macos_passphrase if args.passphrase_dialog else None, emit=emit,
+            delegate=delegate, instructions=instructions)
+        return 0 if result["phase"] == "ended" else 2
+    elif args.command == "watch-t3":
+        if not args.allow_calls: raise ConfigError("Explicit --allow-calls required")
+        if not args.passphrase_dialog and not sys.stdin.isatty() and not keychain_configured(profile_path(args.profile)):
+            raise ConfigError("Interactive terminal or local passphrase dialog required")
+        import importlib.util
+        if importlib.util.find_spec("websockets") is None: raise ConfigError("Use .build/live-venv/bin/python")
+        from .watch import watch_project
+        from .ringing import macos_passphrase
+        import signal
+        def stop_watch(_signum,_frame):raise KeyboardInterrupt()
+        signal.signal(signal.SIGTERM,stop_watch)
+        watch_project(profile_path(args.profile),args.library,args.project_id,authorized=True,
+            secret_input=macos_passphrase if args.passphrase_dialog else getpass.getpass,
+            max_calls=args.max_calls,watch_seconds=args.watch_seconds,call_seconds=args.seconds,
+            question_delay_seconds=args.question_delay_seconds,emit=emit)
+    elif args.command == "ring-test":
+        if not args.allow_call:
+            raise ConfigError("Explicit --allow-call required")
+        if not args.passphrase_dialog and not sys.stdin.isatty() and not keychain_configured(profile_path(args.profile)):
+            raise ConfigError("Interactive terminal or local passphrase dialog required")
+        from .ringing import macos_passphrase, run_authorized_ring_test
+        result = run_authorized_ring_test(profile_path(args.profile), args.library, args.probe,
+            call_authorized=True, max_seconds=args.seconds,
+            secret_input=macos_passphrase if args.passphrase_dialog else None, emit=emit)
+        return 0 if result["phase"] == "ended" else 2
+    elif args.command == "remember-login":
+        from .keychain import remember_database_key, enrollment_dialog
+        if not args.passphrase_dialog and not sys.stdin.isatty() and not keychain_configured(profile_path(args.profile)):
+            raise ConfigError("Interactive terminal or local passphrase dialog required")
+        remember_database_key(profile_path(args.profile),args.library,
+            secret_input=enrollment_dialog if args.passphrase_dialog else getpass.getpass,emit=emit)
     elif args.command == "login":
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required for authorized login")

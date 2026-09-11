@@ -13,9 +13,10 @@ DEFAULT_RUNTIME = Path(".build/vendor/telegram-ios/bazel-bin/bridge_probe/media_
 
 
 class NativeIPC:
-    def __init__(self, executable=DEFAULT_RUNTIME, *, allow_audio=False, on_state=None, on_signal=None):
+    def __init__(self, executable=DEFAULT_RUNTIME, *, allow_audio=False, on_state=None, on_signal=None, on_pcm=None):
         self.on_state = on_state or (lambda _: None)
         self.on_signal = on_signal or (lambda _: None)
+        self.on_pcm = on_pcm
         self.guard = threading.Condition()
         self.writer = threading.Lock()
         self.replies = {}
@@ -50,6 +51,11 @@ class NativeIPC:
                     if len(data) > 512 * 1024:
                         raise GateError("native_signaling_too_large")
                     self.on_signal(base64.b64encode(data).decode())
+                elif event.get("event") == "pcm" and self.on_pcm:
+                    data = bytes.fromhex(event["data_hex"])
+                    if len(data) != 320:
+                        raise GateError("invalid_native_pcm_frame")
+                    self.on_pcm(data)
                 elif type(event.get("id")) is int:
                     with self.guard:
                         if len(self.replies) >= 8:
@@ -113,7 +119,7 @@ class NativeIPC:
 
 
 class NativeMedia:
-    def __init__(self, input_uid, output_uid, *, allow_audio=False, executable=DEFAULT_RUNTIME):
+    def __init__(self, input_uid, output_uid, *, allow_audio=False, executable=DEFAULT_RUNTIME, on_pcm=None):
         self.input_uid, self.output_uid = device_uid(input_uid), device_uid(output_uid)
         if input_uid == output_uid:
             raise GateError("separate_audio_directions_required")
@@ -122,6 +128,10 @@ class NativeMedia:
         self.ipc = None
         self.used = False
         self.relay = 0
+        self.on_pcm = on_pcm
+
+    def descriptor(self, ready):
+        return normalize_ready(ready, self.input_uid, self.output_uid)
 
     def protocol(self):
         # TDLib's pinned schema specifies minimum 65, maximum 92. Advertise only
@@ -133,8 +143,8 @@ class NativeMedia:
         if not self.available or self.used:
             raise GateError("audio_not_authorized_or_session_used")
         self.used = True
-        descriptor = normalize_ready(ready, self.input_uid, self.output_uid)
-        self.ipc = NativeIPC(self.executable, allow_audio=True, on_state=on_state, on_signal=on_signal)
+        descriptor = self.descriptor(ready)
+        self.ipc = NativeIPC(self.executable, allow_audio=True, on_state=on_state, on_signal=on_signal, on_pcm=self.on_pcm)
         try:
             self.ipc.request("prepare", descriptor=descriptor)
             self.ipc.request("start")
@@ -166,6 +176,24 @@ class NativeMedia:
 
     def relay_id(self):
         return self.relay
+
+
+class NativePcmMedia(NativeMedia):
+    def __init__(self, *, on_pcm, allow_audio=False, executable=DEFAULT_RUNTIME):
+        from .descriptor import PCM_INPUT, PCM_OUTPUT
+        super().__init__(PCM_INPUT, PCM_OUTPUT, allow_audio=allow_audio, executable=executable, on_pcm=on_pcm)
+
+    def descriptor(self, ready):
+        from .descriptor import normalize_pcm_ready
+        return normalize_pcm_ready(ready)
+
+    def push_audio(self, data):
+        if not data or len(data) % 2 or len(data) > 64000:
+            raise GateError("invalid_live_pcm")
+        ipc = self.ipc
+        if ipc is None:
+            raise GateError("native_media_not_started")
+        ipc.request("pcm", data_hex=data.hex())
 
 
 def validate_native_descriptor(ready, input_uid, output_uid, executable=DEFAULT_RUNTIME):

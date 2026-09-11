@@ -113,7 +113,9 @@ class CallSession:
         self._discard()
 
     def media_event(self, state):
-        if state == "connected" and self.media_started and not self.stopping and self.phase in ("media_connecting", "media_reconnecting", "active"):
+        if state == "end_requested":
+            self.end("caller_requested")
+        elif state == "connected" and self.media_started and not self.stopping and self.phase in ("media_connecting", "media_reconnecting", "active"):
             self.phase = "active"
             self.connected_at = self.connected_at or self.clock()
             self.reconnecting_at = None

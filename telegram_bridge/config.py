@@ -63,10 +63,29 @@ def write_private_json(path, name, data):
 
 
 def read_profile(path):
-    return validate(read_private_json(path, "config.json"))
+    data = validate(read_private_json(path, "config.json"))
+    target_file = path / "target.json"
+    if target_file.exists() or target_file.is_symlink():
+        target = require_target(read_private_json(path, "target.json"))
+        if data.get("target_username") not in (None, target):
+            raise ConfigError("Conflicting call targets in local profile")
+        data["target_username"] = target
+    return data
 
 
-def read_private_json(path, name):
+def write_target(path, username):
+    """Add a confirmed recipient without rewriting API credentials or session data."""
+    target = require_target({"target_username": username})
+    current = read_profile(path)
+    if current.get("target_username") == target:
+        return False
+    if current.get("target_username") is not None:
+        raise ConfigError("A different call target is already configured")
+    write_private_json(path, "target.json", {"target_username": target})
+    return True
+
+
+def read_private_json(path, name, *, max_bytes=8192):
     if not path.exists():
         raise ConfigError("No local profile configured")
     private_directory(path)
@@ -75,7 +94,7 @@ def read_private_json(path, name):
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ConfigError("Configuration must be an owner-only regular file (0600)")
-        if info.st_size > 8192:
+        if info.st_size > max_bytes:
             raise ConfigError("Configuration is too large")
         return json.load(stream)
 

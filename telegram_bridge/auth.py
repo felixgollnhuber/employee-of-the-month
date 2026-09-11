@@ -74,7 +74,8 @@ def login(profile, library, emit):
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise AuthGate("Another process owns this profile") from None
-        key = local_key(profile)
+        from .keychain import cached_database_key
+        key = cached_database_key(profile) or local_key(profile)
         database = profile / "database"
         private_directory(database)
         td = TDJson(library)
@@ -114,7 +115,7 @@ def login(profile, library, emit):
 
 
 @contextmanager
-def existing_authenticated_client(profile, library):
+def existing_authenticated_client(profile, library, *, secret_input=None, database_key=None):
     """Open only a previously logged-in session. Never requests a login code."""
     config = read_profile(profile)
     database = profile / "database"
@@ -124,7 +125,10 @@ def existing_authenticated_client(profile, library):
     fd = os.open(profile / "session.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
     with os.fdopen(fd, "w") as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        key = local_key(profile)
+        from .keychain import cached_database_key
+        key = database_key or cached_database_key(profile)
+        if key is None:
+            key = local_key(profile) if secret_input is None else local_key(profile, secret_input=secret_input)
         td = TDJson(library)
         td.open()
         try:

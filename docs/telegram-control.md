@@ -1,5 +1,48 @@
 # Telegram-Steuerung: überprüfte Zwischenimplementierung
 
+**Historische Aufbau- und Prüfnotizen.** Seit der Nutzerentscheidung vom 11. September 2026 verwendet der aktuelle Pfad GPT-Live 1 direkt und benötigt keine Desktop-Voice-Automatisierung oder virtuellen Audiogeräte. Ein echtes Gespräch wurde bestätigt. Aktuelle Befehle und Grenzen stehen in der [README](../README.md), aktuelle Nachweise in [evidence.md](evidence.md). Die nachfolgenden Abschnitte dokumentieren die früheren Zwischenstände.
+
+## Einzelner Klingeltest ab 11. September 2026
+
+**Live-Ergebnis am 11. September 2026:** Ein ausdrücklich angeforderter Test lief gegen das konfigurierte persönliche Empfängerkonto. Die bestehende Sitzung wurde erfolgreich geöffnet und der Absender geprüft. Telegram meldete nacheinander `dialing`, `ringing` mit `delivery_reported=true`, Annahme mit `answer_reported=true`, `ending` und bestätigtes `ended`. Genau ein Testlauf wurde gestartet, Exitcode 0. `audio_opened=false` und `media_connected=false` blieben während des gesamten Tests unverändert. Die Zustell-/Annahme-/Endemeldungen sind echte Telegram-Laufzeitbefunde; eine gesonderte Nutzerbestätigung hörbaren Klingelns oder ein Nachweis von Gesprächsaudio liegt damit nicht vor.
+
+Für den ausdrücklich gewünschten ersten Anruf gibt es jetzt einen eigenen Signaling-Test:
+
+```sh
+python3 -m telegram_bridge ring-test --allow-call --seconds 20 --passphrase-dialog
+```
+
+Er öffnet die bestehende verschlüsselte Sitzung mit einem verdeckten lokalen macOS-Passphrase-Dialog, prüft Absender und konfigurierten Empfänger und startet genau einen echten Telegram-Anruf. Die Eingabe wird ausschließlich im Prozess verwendet und weder protokolliert noch gespeichert. Ohne `--passphrase-dialog` ist die verdeckte Terminal-Eingabe möglich. Ein fehlender Login löst keine automatische Codeanforderung aus.
+
+Der Test beendet den Anruf beim ersten `callStateExchangingKeys` oder `callStateReady`, sonst nach der vorgegebenen Frist (1 bis 30 Sekunden). Bestätigtes Auflegen wird zusätzlich bis zu fünf Sekunden abgewartet; fehlende Bestätigung bleibt `end_unconfirmed`. Verzögerte Startantworten werden innerhalb dieses Abbruchfensters ebenfalls aufgelegt. `--allow-call` ist erforderlich. `make check` führt diesen Befehl nicht aus.
+
+Dies ist ein Test von Zustellung, Annahme und Auflegen. Es werden keine Audiogeräte, Medieninstanzen oder Codex-Voice-Sitzungen gestartet. Das angebotene Protokoll wird vorher gegen die tatsächlich gebaute Medienbibliothek geprüft; keine Offline-Testbibliothek wird im Telegram-Netz verwendet. `delivery_reported` bedeutet eine Telegram-Zustellmeldung, keine Nutzerbestätigung eines hörbaren Klingelns. `answer_reported` bezeichnet den Übergang zur Schlüssel-/Verbindungsaushandlung, keine funktionierende Sprachverbindung.
+
+Die bisherigen Audio-Test-Gates gelten unverändert für die vollständige Telefonbrücke. 66 Offline-Tests bestanden nach Ergänzung des Klingeltests. Die untenstehenden älteren Aussagen, es gebe keinen CLI-Anrufbefehl, gelten für den damaligen Stand. API-Grundlage: [createCall](https://core.telegram.org/tdlib/docs/classtd_1_1td__api_1_1create_call.html) und [discardCall](https://core.telegram.org/tdlib/docs/classtd_1_1td__api_1_1discard_call.html), abgeglichen mit dem gepinnten lokalen TDLib-Schema.
+
+## Fortsetzung in T3 Code am 10. September 2026
+
+Der bisherige Codex-Thread `01a08826-0a4e-7ae2-b38f-f9c0805d5738` wurde gelesen. Der Nutzer hat die erfolgreiche Telegram-Client-Anmeldung bestätigt. Lokal sind API-Konfiguration und eine Datenbank vorhanden; die bestehende Sitzung wurde bei der Fortsetzung nicht erneut online geöffnet. Die frühere Aussage, es gebe noch keine Datenbank, gilt nicht mehr. Für diese Datenbank ist die bereits gewählte lokale Passphrase erforderlich.
+
+Die Entwicklung läuft im Worktree `codex-phone-bridge-telegram` auf `feat/telegram-control`. Original-Voice bleibt in der installierten Codex-App; der Wechsel der Entwicklungsoberfläche zu T3 Code ersetzt keine Voice-Integration.
+
+Aktuelle Prüfungen: **59 Offline-Tests** einschließlich sechs neuer Tests für die nachträgliche Empfängerkonfiguration bestanden. Die vor dieser Ergänzung erneut ausgeführten TDLib-/Medien-Metadatenchecks und neun nativen Runtime-Prüfungen bestanden ebenfalls. Keine Anmeldung, Wiedergabe, Aufnahme oder Anruf wurde dabei gestartet.
+
+CoreAudio meldet aktuell keines der beiden benötigten Geräte. Die vorhandene Loopback-Konfiguration enthält `PHONE_TO_CODEX` und `CODEX_TO_PHONE`, beide mit `enabled=false`. Diese Einstellung wurde nur gelesen. Die Routen müssen vor einem Live-Test bewusst vorbereitet werden; die frühere Trial-Rauschproblematik bleibt offen.
+
+### Empfänger nach bestehender Anmeldung ergänzen
+
+```sh
+python3 -m telegram_bridge configure-target
+python3 -m telegram_bridge preflight
+```
+
+`configure-target` fragt lokal nach dem bestätigten Telegram-@Benutzernamen des persönlichen Empfängerkontos und speichert ausschließlich diesen in einer privaten `target.json` (0600) neben `config.json`. API-Datei, Datenbank und Salt bleiben unverändert. Ein identischer Empfänger ist wiederholbar, ein bereits anders konfigurierter Empfänger wird nicht überschrieben. Alte Profile mit eingebettetem Empfänger bleiben lesbar; widersprüchliche Ziele werden abgelehnt. Der Befehl fragt Telegram nicht ab und startet keinen Anruf. Die Online-Prüfung der Empfängeridentität erfolgt weiterhin vor dem Anruf im bestehenden Laufzeitpfad.
+
+Der Nutzer hat inzwischen sein persönliches Telegram-Empfängerkonto genannt; dessen Benutzername ist ausschließlich in der privaten lokalen Zielkonfiguration gespeichert. Der Offline-Preflight bestätigt die Zielkonfiguration. Die Online-Prüfung von Identität und Anrufbarkeit steht noch aus.
+
+Noch offen: nutzbarer Audioweg, erster echter Anruf, Original-Voice-Kontextprüfung und automatische Voice-Steuerung. Die folgenden Abschnitte beschreiben die früheren Implementierungs- und Prüfstände; ihre damaligen Aussagen zur fehlenden Anmeldung werden durch die obige Nutzerbestätigung aktualisiert.
+
 ## Anmeldung nach zu kurzer lokaler Passphrase erneut starten
 
 Wenn die API-Konfiguration bereits erfolgreich gespeichert wurde, **nur `python3 -m telegram_bridge login` erneut ausführen**. `configure` muss nicht wiederholt werden und überspringt bei vorhandener gültiger privater Konfiguration jetzt alle Secret-Eingaben. Es überschreibt nichts.

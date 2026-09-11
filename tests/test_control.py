@@ -75,6 +75,19 @@ class ControlTests(unittest.TestCase):
         self.media.callback("connected")
         self.assertEqual(self.session.phase, "active")
 
+    def test_spoken_end_request_stops_media_and_discards_call_once(self):
+        self.start(); self.created()
+        self.session.handle(self.event("callStateReady"))
+        self.media.callback("connected")
+        self.media.callback("end_requested")
+        self.media.callback("end_requested")
+        self.assertEqual(self.session.phase,"ending")
+        self.assertEqual(self.session.reason,"caller_requested")
+        self.assertEqual(self.media.stops,1)
+        self.assertEqual(sum(x["@type"]=="discardCall" for x in self.sent),1)
+        self.session.handle(self.event("callStateDiscarded"))
+        self.assertEqual(self.session.phase,"ended")
+
     def test_end_is_idempotent_and_requires_terminal_update(self):
         self.start(); self.created()
         self.session.handle(self.event("callStateReady"))

@@ -7,6 +7,7 @@
 #include "api/make_ref_counted.h"
 #include "rtc_base/logging.h"
 #include "strict_devices.h"
+#include "pcm_audio.h"
 #include <array>
 #include <chrono>
 #include <future>
@@ -82,7 +83,7 @@ public:
     }
 };
 
-tgcalls::Descriptor descriptor(const Json &data) {
+tgcalls::Descriptor descriptor(const Json &data, const std::shared_ptr<PcmChannel> &pcm) {
     if (requiredString(data, "version") != "12.0.0" || !data["outgoing"].is_bool() || !data["outgoing"].bool_value())
         throw std::runtime_error("unsupported_version_or_direction");
     auto bytes = unhex(requiredString(data, "key_hex", 512), 256);
@@ -131,17 +132,34 @@ tgcalls::Descriptor descriptor(const Json &data) {
         if (bytes.size() > 512 * 1024) _Exit(4);
         emit({{"event", "signaling"}, {"data_hex", hex(bytes)}});
     };
+    if (data["audio_mode"].string_value() == "pcm16") {
+        if (d.initialInputDeviceId != kPcmInput || d.initialOutputDeviceId != kPcmOutput)
+            throw std::runtime_error("invalid_pcm_endpoints");
+        d.createWrappedAudioDeviceModule = [pcm](webrtc::TaskQueueFactory *) {
+            auto result = makePcmAudio(pcm);
+            if (!result) _Exit(5); // Never fall back to physical hardware.
+            return result;
+        };
+    } else {
+    if (!data["audio_mode"].is_null() && data["audio_mode"].string_value() != "devices")
+        throw std::runtime_error("invalid_audio_mode");
     d.createWrappedAudioDeviceModule = [](webrtc::TaskQueueFactory *factory) -> webrtc::scoped_refptr<tgcalls::WrappedAudioDeviceModule> {
         if (!bridge_devices_alive()) _Exit(5);
         auto underlying = webrtc::AudioDeviceModule::Create(webrtc::AudioDeviceModule::kPlatformDefaultAudio, factory);
         if (!underlying || underlying->Init() != 0) _Exit(5); // Never let tgcalls take its default fallback.
         return rtc::make_ref_counted<StrictADM>(underlying);
     };
+    }
     return d;
 }
 }
 
 int main(int argc, char **argv) {
+    if (argc == 2 && std::string(argv[1]) == "--pcm-self-test") {
+        bool ok = checkPcmAudio();
+        std::cout << (ok ? "{\"pcm_callbacks_verified\":true,\"audio_devices_opened\":false,\"call_created\":false}\n" : "{\"pcm_callbacks_verified\":false}\n");
+        return ok ? 0 : 1;
+    }
     bool allowAudio = argc == 2 && std::string(argv[1]) == "--allow-audio";
     if (argc > 1 && !allowAudio) return 2;
     if (isatty(STDIN_FILENO)) return 2;
@@ -154,6 +172,9 @@ int main(int argc, char **argv) {
     tgcalls::Register<tgcalls::InstanceV2Impl>();
     std::unique_ptr<tgcalls::Descriptor> prepared;
     std::unique_ptr<tgcalls::Instance> call;
+    bool pcmMode = false;
+    auto pcm = std::make_shared<PcmChannel>();
+    pcm->output = [](const std::vector<uint8_t> &bytes) { emit({{"event", "pcm"}, {"data_hex", hex(bytes)}}); };
     bool used = false;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(240);
     auto stop = [&]() {
@@ -162,13 +183,13 @@ int main(int argc, char **argv) {
         auto complete = std::make_shared<std::promise<void>>(); auto done = complete->get_future();
         call->stop([complete](tgcalls::FinalState) { complete->set_value(); });
         if (done.wait_for(std::chrono::seconds(5)) != std::future_status::ready) { emit({{"event", "state"}, {"state", "failed"}}); _Exit(6); }
-        call.reset(); return relay;
+        call.reset(); pcm->clear(); return relay;
     };
     while (std::chrono::steady_clock::now() < deadline) {
-        if (call && !bridge_devices_alive()) { emit({{"event", "state"}, {"state", "failed"}}); stop(); break; }
+        if (call && (pcmMode ? pcm->failed.load() : !bridge_devices_alive())) { emit({{"event", "state"}, {"state", "failed"}}); stop(); break; }
         struct pollfd input{STDIN_FILENO, POLLIN, 0};
         if (poll(&input, 1, 100) <= 0) {
-            if (call && !bridge_devices_alive()) { emit({{"event", "state"}, {"state", "failed"}}); stop(); break; }
+            if (call && (pcmMode ? pcm->failed.load() : !bridge_devices_alive())) { emit({{"event", "state"}, {"state", "failed"}}); stop(); break; }
             continue;
         }
         std::string line;
@@ -187,19 +208,28 @@ int main(int argc, char **argv) {
                 emit({{"id", id}, {"ok", true}, {"devices", devices}, {"audio_opened", false}});
             } else if (op == "prepare") {
                 if (prepared || used) throw std::runtime_error("session_already_used");
-                prepared = std::make_unique<tgcalls::Descriptor>(descriptor(request["descriptor"]));
+                prepared = std::make_unique<tgcalls::Descriptor>(descriptor(request["descriptor"], pcm));
+                pcmMode = request["descriptor"]["audio_mode"].string_value() == "pcm16";
                 emit({{"id", id}, {"ok", true}, {"prepared", true}, {"audio_opened", false}, {"call_created", false},
                       {"relay_count", int(prepared->rtcServers.size())}, {"key_bytes", 256}, {"audio_only", true}});
             } else if (op == "start") {
                 if (!allowAudio) throw std::runtime_error("audio_test_not_authorized");
                 if (!prepared || used) throw std::runtime_error("not_prepared");
                 used = true;
-                if (!bridge_set_devices(prepared->initialInputDeviceId, prepared->initialOutputDeviceId) || !bridge_devices_alive())
+                if (!pcmMode && (!bridge_set_devices(prepared->initialInputDeviceId, prepared->initialOutputDeviceId) || !bridge_devices_alive()))
                     throw std::runtime_error("exact_audio_devices_unavailable");
                 call = tgcalls::Meta::Create("12.0.0", std::move(*prepared)); prepared.reset();
                 if (!call) throw std::runtime_error("native_create_failed");
                 deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
                 emit({{"id", id}, {"ok", true}, {"started", true}});
+            } else if (op == "pcm") {
+                if (!call || !pcmMode) throw std::runtime_error("media_not_started");
+                if (!pcm->push(unhex(requiredString(request, "data_hex", 128000))))
+                    throw std::runtime_error("pcm_buffer_rejected");
+                emit({{"id", id}, {"ok", true}});
+            } else if (op == "pcm-clear") {
+                if (!pcmMode) throw std::runtime_error("media_not_started");
+                pcm->clear(); emit({{"id", id}, {"ok", true}});
             } else if (op == "signal") {
                 if (!call) throw std::runtime_error("media_not_started");
                 call->receiveSignalingData(unhex(requiredString(request, "data_hex", 1024 * 1024)));
@@ -208,7 +238,8 @@ int main(int argc, char **argv) {
                 const auto relay = stop(); prepared.reset(); used = true;
                 emit({{"id", id}, {"ok", true}, {"stopped", true}, {"relay_id", relay}});
             } else if (op == "status") {
-                emit({{"id", id}, {"ok", true}, {"prepared", bool(prepared)}, {"call_created", bool(call)}, {"audio_authorized", allowAudio}});
+                emit({{"id", id}, {"ok", true}, {"prepared", bool(prepared)}, {"call_created", bool(call)}, {"audio_authorized", allowAudio},
+                    {"audio_mode", pcmMode ? "pcm16" : "devices"}, {"pcm_input_frames", double(pcm->inputFrames)}, {"pcm_output_frames", double(pcm->outputFrames)}});
             } else throw std::runtime_error("unknown_operation");
         } catch (const std::exception &error) {
             // Only fixed diagnostic codes, never arbitrary exception/request text.
@@ -217,7 +248,7 @@ int main(int argc, char **argv) {
                 "missing_privacy_policy", "invalid_custom_parameters", "invalid_relay_set", "invalid_relay",
                 "empty_relay", "invalid_reflector", "oversize_request", "invalid_json", "session_already_used",
                 "audio_test_not_authorized", "not_prepared", "exact_audio_devices_unavailable",
-                "native_create_failed", "media_not_started", "unknown_operation"};
+                "native_create_failed", "media_not_started", "unknown_operation", "invalid_pcm_endpoints", "invalid_audio_mode", "pcm_buffer_rejected"};
             const std::string code = codes.count(error.what()) ? error.what() : "request_rejected";
             emit({{"id", id}, {"ok", false}, {"error", code}});
         }

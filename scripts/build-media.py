@@ -97,6 +97,7 @@ probe = source / "bridge_probe"
 probe.mkdir(exist_ok=True)
 for source_name, destination in (("media_probe.BUILD", "BUILD"), ("media_probe.cpp", "media_probe.cpp"),
                                  ("media_runtime.cpp", "media_runtime.cpp"), ("strict_devices.cpp", "strict_devices.cpp"),
+                                 ("pcm_audio.cpp", "pcm_audio.cpp"), ("pcm_audio.h", "pcm_audio.h"),
                                  ("strict_devices.h", "strict_devices.h")):
     content = (root / "native" / source_name).read_bytes()
     path = probe / destination
