@@ -40,6 +40,6 @@ Der Dienst besitzt jetzt ein privates `call-history.json` mit laufend gespeicher
 
 ## Explizite Folgenachrichten an bestehende Threads
 
-Der neue getrennte Versandpfad unterstützt ausdrücklich adressierte Folgenachrichten auch an completed und settled Threads. Eindeutige Titel oder Thread-IDs, offene Rückfragen und dauerhafte Versandreservierungen werden vor der Zustellung geprüft. Formulierungen, Wiederholungsregeln und die Grenzen des Offline-Nachweises stehen in [thread-followups.md](thread-followups.md). Die Implementierung im Entwicklungs-Worktree ändert keine laufende Dienstinstallation.
+Der neue getrennte Versandpfad unterstützt ausdrücklich adressierte Folgenachrichten auch an completed und settled Threads. Eindeutige Titel oder Thread-IDs, offene Rückfragen und dauerhafte Versandreservierungen werden vor der Zustellung geprüft. Formulierungen, Wiederholungsregeln und die Grenzen des Offline-Nachweises stehen in [thread-followups.md](thread-followups.md). Die aktualisierte feste Dienstinstallation wurde auf gesonderten Nutzerauftrag aktiviert; der genaue Release- und Laufzeitnachweis steht in der verlinkten Dokumentation.
 
 Beendete Telefongespräche markieren ihre technischen Koordinations-Threads automatisch über das T3-Settled-Feature. Die Zuordnung von Gesprächsende zu Settled-Status, die dauerhafte Vormerkung in `conversations.json` und die verbleibenden Einschränkungen stehen im Abschnitt Settled-Status in `telegram-service.md`. Fachliche Arbeits-Threads sind davon ausgenommen.
