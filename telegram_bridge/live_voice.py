@@ -249,10 +249,11 @@ class LiveVoice:
 
 class LivePcmMedia:
     def __init__(self, api_key, *, instructions, authorized=False, max_seconds=120,
-                 delegate=None, emit=lambda status: None, voice=DEFAULT_VOICE):
+                 delegate=None, emit=lambda status: None, voice=DEFAULT_VOICE, native_executable=None):
         self.available = authorized is True
         self.stopping = False
-        self.native = NativePcmMedia(on_pcm=self._from_phone, allow_audio=authorized)
+        native_options = {} if native_executable is None else {'executable': native_executable}
+        self.native = NativePcmMedia(on_pcm=self._from_phone, allow_audio=authorized, **native_options)
         self.voice = LiveVoice(api_key, instructions=instructions, audio_out=self._to_phone,
                                max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice)
 

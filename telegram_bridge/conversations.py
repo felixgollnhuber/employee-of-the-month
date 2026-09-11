@@ -1,0 +1,327 @@
+"""Durable conversation state. Only the service's serialized worker uses this module."""
+import json
+import os
+from pathlib import Path
+import re
+import tempfile
+import uuid
+import time
+import hashlib
+from datetime import datetime
+
+from .config import private_directory, read_private_json
+from .control import GateError
+from .handoff import pending_requests, _pending
+from .t3 import T3Delegation, selected_context
+from .watch import question_due
+
+
+class ConversationStore:
+    def __init__(self, profile, project_id, target_id):
+        self.profile = Path(profile)
+        private_directory(self.profile)
+        path = self.profile / 'conversations.json'
+        self.data = read_private_json(self.profile, path.name, max_bytes=8*1024*1024) if path.exists() or path.is_symlink() else {
+            'version': 1, 'project_id': project_id, 'target_id': target_id, 'activated_at': int(time.time()),
+            'operations': {}, 'updates': {}, 'outbox': {}, 'calls': {}}
+        if (self.data.get('version') != 1 or self.data.get('project_id') != project_id
+                or self.data.get('target_id') != target_id):
+            raise GateError('conversation_store_scope_mismatch')
+        self.save()
+
+    def save(self):
+        raw = json.dumps(self.data, ensure_ascii=False)
+        if len(raw.encode()) > 8*1024*1024:
+            raise GateError('conversation_store_maintenance_required')
+        fd, name = tempfile.mkstemp(prefix='.conversations-', dir=self.profile)
+        try:
+            with os.fdopen(fd, 'w') as stream:
+                stream.write(raw)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(name, self.profile / 'conversations.json')
+            directory = os.open(self.profile, os.O_RDONLY)
+            try: os.fsync(directory)
+            finally: os.close(directory)
+        finally:
+            if os.path.exists(name): os.unlink(name)
+
+
+class Conversations:
+    def __init__(self, store, client, send, *, emit=lambda value: None):
+        self.store, self.client, self.send, self.emit = store, client, send, emit
+        self.data = store.data
+        self.delegates = {}
+        legacy = store.profile / 'watch-attempts.json'
+        self.legacy_attempts = read_private_json(store.profile, legacy.name, max_bytes=262144) if legacy.exists() or legacy.is_symlink() else {}
+        if not isinstance(self.legacy_attempts, dict): raise GateError('invalid_watcher_state')
+
+    def delegate(self, operation):
+        identifier = operation['id']
+        if identifier not in self.delegates:
+            self.delegates[identifier] = T3Delegation.restore(self.client, operation['dialog'], emit=self.emit)
+        dialog = self.delegates[identifier]
+        def checkpoint():
+            operation['dialog'] = dialog.state()
+            operation['request_id'] = dialog.handoff.request_id
+            self.store.save()
+        dialog.checkpoint = checkpoint
+        return dialog
+
+    def discover(self, delay=180):
+        shell = self.client.request('/api/orchestration/shell')
+        for thread in shell.get('threads', []):
+            if (thread.get('projectId') != self.data['project_id'] or thread.get('archivedAt')
+                    or thread.get('deletedAt') or not thread.get('hasPendingUserInput')):
+                continue
+            snapshot = self.client.snapshot(thread['id'])
+            for operation in list(self.data['operations'].values()):
+                if (operation['thread_id'] == thread['id'] and operation['status'] in ('open', 'deferred')
+                        and operation['dialog']['submitted']):
+                    self.refresh(operation)
+            for request_id in pending_requests(snapshot):
+                if any(o['thread_id'] == thread['id'] and request_id in o['dialog']['request_ids_in_call']
+                       for o in self.data['operations'].values()):
+                    continue
+                if not question_due(snapshot, request_id, delay): continue
+                dialog = T3Delegation(self.client, thread['id'], request_id, emit=self.emit)
+                activity = _pending(snapshot, request_id)[1]
+                try:
+                    asked_at = int(datetime.fromisoformat(activity['createdAt'].replace('Z', '+00:00')).timestamp())
+                except (KeyError, ValueError, TypeError): asked_at = int(time.time())
+                identifier = uuid.uuid4().hex[:12]
+                self.data['operations'][identifier] = {
+                    'id': identifier, 'thread_id': thread['id'], 'request_id': request_id,
+                    'title': dialog.packet['thread_title'], 'dialog': dialog.state(),
+                    'transcript': [], 'status': 'open', 'attempt': None, 'first_message': None,
+                    'created_at': max(asked_at, self.data['activated_at'])}
+                if thread['id'] + ':' + request_id in self.legacy_attempts:
+                    self.data['operations'][identifier]['attempt'] = {
+                        'id': uuid.uuid4().hex, 'phase': 'imported_watcher_attempt'}
+                self.delegates[identifier] = dialog
+                self.store.save()
+        return self.open_operations()
+
+    def refresh(self, operation):
+        dialog = self.delegate(operation)
+        snapshot = self.client.snapshot(operation['thread_id'])
+        dialog._validate_source(snapshot)
+        if operation['status'] == 'completed' and dialog.completed: return False
+        if dialog.submitted:
+            dialog._observe_source(snapshot)
+        elif dialog.handoff.request_id not in pending_requests(snapshot):
+            operation['status'] = 'stale'
+        if dialog.completed: operation['status'] = 'completed'
+        elif dialog.deferred: operation['status'] = 'deferred'
+        elif operation['status'] == 'completed': operation['status'] = 'open'
+        dialog.checkpoint()
+        return operation['status'] in ('open', 'deferred')
+
+    def open_operations(self):
+        result = []
+        for operation in self.data['operations'].values():
+            if operation['status'] in ('stale', 'completed'): continue
+            try:
+                if self.refresh(operation): result.append(operation)
+            except GateError as error:
+                if str(error) == 't3_thread_unavailable':
+                    operation['status'] = 'stale'
+                    self.store.save()
+                else: raise
+        return result
+
+    def reserve_attempt(self, delay=0):
+        for operation in self.open_operations():
+            if operation['status'] == 'open' and operation['attempt'] is None:
+                if not question_due(self.client.snapshot(operation['thread_id']), operation['request_id'], delay):
+                    continue
+                operation['attempt'] = {'id': uuid.uuid4().hex, 'phase': 'starting'}
+                self.store.save()  # Before createCall. Never redial after a crash.
+                return operation['id']
+        return None
+
+    def recover(self):
+        for operation in list(self.data['operations'].values()):
+            if operation['attempt'] and operation['first_message'] is None:
+                self.finish_attempt(operation['id'], {'phase': 'interrupted', 'reason': 'service_restart'})
+
+    def begin_incoming(self, operation, call_id):
+        previous = operation['attempt']
+        if previous and call_id is not None and previous.get('call_id') == call_id: return
+        if previous:
+            operation.setdefault('contact_history', []).append({**previous, 'first_message': operation['first_message']})
+        operation['attempt'] = {'id': uuid.uuid4().hex, 'phase': 'incoming', 'call_id': call_id}
+        operation['first_message'] = None
+        self.store.save()
+
+    def notice_key(self, operation):
+        packet = operation['dialog']['packet']
+        return hashlib.sha256(json.dumps([operation['request_id'], packet.get('source_reply')],
+                                          ensure_ascii=False).encode()).hexdigest()
+
+    def poll_dialogs(self):
+        for operation in self.open_operations():
+            dialog = self.delegate(operation)
+            if (operation['status'] == 'open' and operation.get('last_notice')
+                    and not dialog.mutation_uncertain and dialog.last_report
+                    and operation['last_notice'] != self.notice_key(operation)):
+                self.queue_text(dialog.last_report[:3500], operation=operation, purpose='source_reply')
+
+    def queue_text(self, text, *, operation=None, reply_to=None, purpose='reply'):
+        identifier = uuid.uuid4().hex
+        item = {'id': identifier, 'operation_id': operation['id'] if operation else None,
+                'request_id': operation['request_id'] if operation else None,
+                'purpose': purpose, 'status': 'reserved', 'message_ids': [], 'text': text[:4000]}
+        self.data['outbox'][identifier] = item
+        if operation: operation['last_notice'] = self.notice_key(operation)
+        if purpose == 'first': operation['first_message'] = identifier
+        self.store.save()  # Ambiguous sends are never retried automatically.
+        content = {'@type': 'inputMessageText', 'text': {'@type': 'formattedText', 'text': item['text'], 'entities': []},
+                   'clear_draft': False}
+        request = {'@type': 'sendMessage', 'chat_id': self.data['target_id'],
+                   '@extra': 'conversation-' + identifier, 'input_message_content': content}
+        if reply_to:
+            request['reply_to'] = {'@type': 'inputMessageReplyToMessage', 'message_id': reply_to}
+        self.send(request)
+
+    def finish_attempt(self, identifier, status):
+        operation = self.data['operations'][identifier]
+        operation['attempt']['phase'] = status['phase']
+        operation['attempt']['reason'] = status.get('reason')
+        operation['attempt']['call_id'] = status.get('call_id', operation['attempt'].get('call_id'))
+        self.store.save()
+        if (not self.refresh(operation) or operation['status'] != 'open'
+                or operation['first_message'] is not None or operation['attempt'].get('followup_suppressed')): return
+        questions = ' '.join(q['question'] for q in self.delegate(operation).packet['questions'])
+        self.queue_text(f"Ich brauche noch kurz deine Einschätzung zu {operation['title']}: {questions[:2500]}\n"
+                        f"Antworte einfach hier oder ruf zurück. Vorgang {identifier}.", operation=operation, purpose='first')
+
+    def delivery(self, event):
+        tag = event.get('@extra', '')
+        item = self.data['outbox'].get(tag.removeprefix('conversation-')) if isinstance(tag, str) else None
+        message = event.get('message', event)
+        if item is None:
+            old = event.get('old_message_id')
+            item = next((i for i in self.data['outbox'].values() if old in i['message_ids']), None) if old else None
+        if item is None or message.get('chat_id', self.data['target_id']) != self.data['target_id']: return
+        kind = event.get('@type')
+        if kind in ('error', 'updateMessageSendFailed') and item['status'] != 'sent': item['status'] = 'failed'
+        elif kind in ('message', 'updateMessageSendSucceeded'):
+            mid = message.get('id')
+            if type(mid) is int and mid not in item['message_ids']: item['message_ids'].append(mid)
+            if item['status'] != 'sent':
+                item['status'] = 'sent' if kind == 'updateMessageSendSucceeded' or not message.get('sending_state') else 'pending'
+        self.store.save()
+
+    def select(self, text, reply_to=None):
+        explicit = [o for key, o in self.data['operations'].items() if re.search(r'(?<!\w)' + re.escape(key) + r'(?!\w)', text)]
+        linked = [self.data['operations'][i['operation_id']] for i in self.data['outbox'].values()
+                  if reply_to and reply_to in i['message_ids'] and i['operation_id']]
+        candidates = {o['id']: o for o in explicit + linked}
+        if len(candidates) == 1: return next(iter(candidates.values()))
+        if candidates: return None
+        if reply_to: return None
+        available = self.open_operations()
+        return available[0] if len(available) == 1 else None
+
+    def status_text(self):
+        shell = self.client.request('/api/orchestration/shell')
+        lines = []
+        for thread in shell.get('threads', []):
+            if thread.get('projectId') != self.data['project_id'] or thread.get('archivedAt') or thread.get('deletedAt'): continue
+            source = self.client.snapshot(thread['id'])['thread']
+            state = (source.get('latestTurn') or {}).get('state', 'unbekannt')
+            lines.append(f"{source.get('title', 'Aufgabe')}: {state}. {selected_context(source)}")
+        return '\n'.join(lines)[:10000] or 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
+
+    def status_reply(self, text):
+        shell = self.client.request('/api/orchestration/shell')
+        thread = next((t for t in shell.get('threads', []) if t.get('projectId') == self.data['project_id']
+                       and not t.get('archivedAt') and not t.get('deletedAt')), None)
+        if thread is None: return 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
+        coordinator = self.data.get('status_coordinator')
+        if coordinator is None:
+            coordinator = self.client.create_coordinator(self.client.snapshot(thread['id'])['thread'])
+            self.data['status_coordinator'] = coordinator
+            self.store.save()
+        return self.client.run_coordinator(coordinator,
+            'Du bist Mitarbeiter des Monats. Keine Tools, Dateizugriffe oder Projektaktionen. '
+            'Beantworte die Statusfrage natürlich und knapp auf Deutsch, ausschließlich anhand dieser Daten. '
+            'Nenne offene Fragen und Probleme nur, wenn sie belegt sind.\n' + json.dumps(
+                {'question': text, 'status': self.status_text()}, ensure_ascii=False))[:3500]
+
+    def respond(self, operation, text):
+        previous_request = operation['request_id']
+        if not self.refresh(operation) and operation['status'] == 'stale':
+            return 'Diese Rückfrage ist inzwischen in T3 erledigt oder veraltet. Ich habe nichts übertragen.'
+        dialog = self.delegate(operation)
+        if previous_request != operation['request_id']:
+            return 'Inzwischen gibt es eine neue Rückfrage: ' + ' '.join(q['question'] for q in dialog.packet['questions'])[:2500]
+        if text.strip().casefold().rstrip('.!') in ('jetzt nicht', 'später', 'nicht jetzt', 'bitte später'):
+            dialog.deferred = True
+            operation['status'] = 'deferred'
+            dialog.checkpoint()
+            return 'Alles klar, ich warte. Melde dich hier oder ruf zurück, sobald es passt. Ich fasse nicht automatisch nach.'
+        if operation['status'] == 'completed':
+            if pending_requests(self.client.snapshot(operation['thread_id'])):
+                return 'Inzwischen gibt es eine neue offene Rückfrage. Bitte antworte auf deren Nachricht oder nenne die neue Vorgangs-ID. Diese Korrektur habe ich nicht übertragen.'
+            # An explicitly linked late correction is a new source turn, never a replay of the old Ask.
+            dialog.completed = False
+        operation['status'] = 'open'
+        dialog.deferred = False
+        operation['transcript'].append({'role': 'user', 'text': text})
+        operation['transcript'] = operation['transcript'][-30:]
+        dialog.adopted_revision = None  # This is fresh input, including after process restart.
+        dialog.checkpoint()
+        dialog.channel = 'text'
+        try: result = dialog(operation['transcript'])
+        finally: dialog.channel = 'voice'
+        if dialog.completed:
+            result = 'Alles klar, damit habe ich alles. Deine Antwort ist in T3 angekommen. Ich mache weiter.'
+            operation['status'] = 'completed'
+        elif dialog.deferred: operation['status'] = 'deferred'
+        operation['transcript'].append({'role': 'assistant', 'text': result})
+        dialog.checkpoint()
+        return result
+
+    def message(self, message):
+        sender = message.get('sender_id', {})
+        if (message.get('is_outgoing') is not False or message.get('chat_id') != self.data['target_id']
+                or sender.get('@type') != 'messageSenderUser' or sender.get('user_id') != self.data['target_id']):
+            return
+        content = message.get('content', {})
+        text = content.get('text', {}).get('text') if content.get('@type') == 'messageText' else None
+        if not isinstance(text, str) or not 0 < len(text) <= 8000 or type(message.get('id')) is not int: return
+        if type(message.get('date')) is not int or message['date'] < self.data['activated_at']: return
+        key = str(message['id']) + ':' + hashlib.sha256(text.encode()).hexdigest()
+        if key in self.data['updates']: return
+        self.data['updates'][key] = 'processing'
+        self.store.save()  # A crash cannot replay a decision.
+        self.discover(0)
+        reply = message.get('reply_to') or {}
+        reply_id = reply.get('message_id') if reply.get('chat_id', self.data['target_id']) in (0, self.data['target_id']) else None
+        operation = self.select(text, reply_id)
+        linked_request = next((i.get('request_id') for i in self.data['outbox'].values()
+                               if reply_id and reply_id in i['message_ids']), None)
+        if operation and (type(message.get('date')) is not int or message['date'] < operation['created_at']):
+            self.data['updates'][key] = 'stale'
+            self.store.save()
+            return
+        if re.search(r'(?i)\b(status|fortschritt|probleme)\b|wie läuft', text) and not reply_id:
+            operation = None
+            answer = self.status_reply(text)
+        elif operation and linked_request and linked_request != operation['request_id']:
+            answer = 'Die Nachricht gehört zu einer früheren Rückfrage. Aktuell offen: ' + ' '.join(
+                q['question'] for q in self.delegate(operation).packet['questions'])[:2500]
+        elif operation:
+            if operation['attempt']:
+                operation['attempt']['followup_suppressed'] = True
+                self.store.save()
+            answer = self.respond(operation, text)
+        else:
+            available = self.open_operations()
+            answer = ('Welchen Vorgang meinst du? Bitte nenne die Vorgangs-ID oder antworte auf die passende Nachricht.\n'
+                      + '\n'.join(f"{o['id']}: {o['title']}" for o in available)) if available else self.status_reply(text)
+        self.queue_text(answer, operation=operation, reply_to=message['id'])
+        self.data['updates'][key] = 'handled'
+        self.store.save()

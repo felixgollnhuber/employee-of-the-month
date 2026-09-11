@@ -107,7 +107,10 @@ def normalize_ready(ready, input_uid, output_uid):
             raise ValueError()
     except (ValueError, TypeError):
         raise GateError("invalid_custom_parameters") from None
-    return {"version": SUPPORTED_VERSION, "key_hex": key.hex(), "outgoing": True,
+    outgoing = ready.get("bridge_outgoing", True)
+    if type(outgoing) is not bool:
+        raise GateError("invalid_call_direction")
+    return {"version": SUPPORTED_VERSION, "key_hex": key.hex(), "outgoing": outgoing,
             "input_uid": input_uid, "output_uid": output_uid,
             "enable_p2p": ready["allow_p2p"], "custom_parameters": custom,
             "rtc_servers": rtc_servers}

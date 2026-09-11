@@ -110,6 +110,17 @@ def main():
                        help="Wait after a question is created before calling (default: 180)")
     watch.add_argument("--passphrase-dialog", action="store_true")
     watch.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    service = sub.add_parser("serve-t3", help="Telegram-Folgedialoge und eingehende Anrufe für genau ein T3-Projekt")
+    service.add_argument("--profile", default="default")
+    service.add_argument("--project-id", required=True)
+    service.add_argument("--allow-messages-and-calls", action="store_true")
+    service.add_argument("--service-seconds", type=int, default=3600)
+    service.add_argument("--seconds", type=int, default=120)
+    service.add_argument("--max-calls", type=int, default=1)
+    service.add_argument("--question-delay-seconds", type=int, default=180)
+    service.add_argument("--passphrase-dialog", action="store_true")
+    service.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    service.add_argument("--media-runtime", type=Path, help="Separat gebaute native Laufzeit mit eingehender Audiorichtung")
     args = parser.parse_args()
     if args.command == "native-check":
         emit(offline_native_check(args.library))
@@ -203,6 +214,19 @@ def main():
             secret_input=macos_passphrase if args.passphrase_dialog else None, emit=emit,
             delegate=delegate, instructions=instructions)
         return 0 if result["phase"] == "ended" else 2
+    elif args.command == "serve-t3":
+        if not args.allow_messages_and_calls:
+            raise ConfigError("Explicit --allow-messages-and-calls required")
+        from .service import run_service
+        from .ringing import macos_passphrase
+        import signal
+        def stop_service(_signum, _frame): raise KeyboardInterrupt()
+        signal.signal(signal.SIGTERM, stop_service)
+        run_service(profile_path(args.profile), args.library, args.project_id, authorized=True,
+                    seconds=args.service_seconds, call_seconds=args.seconds, max_calls=args.max_calls,
+                    question_delay=args.question_delay_seconds,
+                    native_executable=args.media_runtime,
+                    secret_input=macos_passphrase if args.passphrase_dialog else getpass.getpass, emit=emit)
     elif args.command == "watch-t3":
         if not args.allow_calls: raise ConfigError("Explicit --allow-calls required")
         if not args.passphrase_dialog and not sys.stdin.isatty() and not keychain_configured(profile_path(args.profile)):

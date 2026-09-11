@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+import argparse
 
 root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
@@ -13,12 +14,19 @@ from telegram_bridge.descriptor import normalize_ready
 from telegram_bridge.runtime import DEFAULT_RUNTIME, NativeIPC, NativeMedia, validate_native_descriptor
 from telegram_bridge.control import GateError
 
-exe = root / DEFAULT_RUNTIME
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument('--executable', type=Path, default=root / DEFAULT_RUNTIME)
+exe = parser.parse_args().executable.resolve(strict=True)
 ready = fixture_ready()
 descriptor = normalize_ready(ready, "fixture.input.uid", "fixture.output.uid")
 checks = 0
 result = validate_native_descriptor(ready, "fixture.input.uid", "fixture.output.uid", exe)
 assert result == {"native_descriptor": "validated", "call_created": False, "audio_opened": False}
+checks += 1
+
+result = validate_native_descriptor({**ready, 'bridge_outgoing': False},
+                                   'fixture.input.uid', 'fixture.output.uid', exe)
+assert result == {'native_descriptor': 'validated', 'call_created': False, 'audio_opened': False}
 checks += 1
 
 requests = [{"id": 1, "op": "prepare", "descriptor": descriptor},
@@ -36,7 +44,7 @@ assert descriptor["key_hex"] not in run.stdout and "fixture-turn-password" not i
 assert run.stderr == ""
 checks += 4
 
-for invalid in ({**descriptor, "version": "unknown"}, {**descriptor, "key_hex": "bad"},
+for invalid in ({**descriptor, "version": "unknown"}, {**descriptor, "outgoing": "false"}, {**descriptor, "key_hex": "bad"},
                 {**descriptor, "input_uid": "default"}):
     ipc = NativeIPC(exe)
     try:

@@ -56,6 +56,26 @@ class CallSession:
         self.create_tag = "create-" + uuid.uuid4().hex
         self.end_tag = "end-" + uuid.uuid4().hex
         self.create_resolved = False
+        self.outgoing = True
+
+    def accept(self, call, target_user_id, *, authorized=False, consent=False):
+        if self.phase != "idle":
+            raise GateError("session_already_used")
+        if (not authorized or not consent or type(target_user_id) is not int
+                or target_user_id <= 0 or call.get("user_id") != target_user_id
+                or call.get("is_outgoing") is not False or call.get("is_video") is not False
+                or type(call.get("id")) is not int
+                or call.get("state", {}).get("@type") != "callStatePending"):
+            raise GateError("authorized_incoming_audio_call_required")
+        if not self.media.available:
+            raise GateError("native_media_engine_not_built")
+        protocol = validate_protocol(self.media.protocol())
+        self.outgoing = False
+        self.target, self.call_id = target_user_id, call["id"]
+        self.created_at, self.phase = self.clock(), "exchanging_keys"
+        self.create_resolved = True
+        self.send({"@type": "acceptCall", "call_id": self.call_id,
+                   "protocol": protocol, "@extra": self.create_tag})
 
     def status(self):
         return {"phase": self.phase, "reason": self.reason, "call_id": self.call_id,
@@ -132,6 +152,9 @@ class CallSession:
     def handle(self, event):
         kind = event.get("@type")
         if event.get("@extra") == self.create_tag:
+            if not self.outgoing and kind == "error":
+                self.end("accept_failed")
+                return
             if self.create_resolved:
                 return
             if kind == "error":
@@ -203,7 +226,7 @@ class CallSession:
             self.media_started = True
             try:
                 # Keep encryption material in memory; the engine owns format negotiation.
-                self.media.start(state, self.media_event, self.signaling_from_media)
+                self.media.start({**state, "bridge_outgoing": self.outgoing}, self.media_event, self.signaling_from_media)
                 buffered, self.pending_signaling = self.pending_signaling, []
                 for data in buffered:
                     if not self.stopping:

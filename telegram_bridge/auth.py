@@ -115,7 +115,7 @@ def login(profile, library, emit):
 
 
 @contextmanager
-def existing_authenticated_client(profile, library, *, secret_input=None, database_key=None):
+def existing_authenticated_client(profile, library, *, secret_input=None, database_key=None, on_update=None):
     """Open only a previously logged-in session. Never requests a login code."""
     config = read_profile(profile)
     database = profile / "database"
@@ -139,6 +139,7 @@ def existing_authenticated_client(profile, library, *, secret_input=None, databa
                 event = td.receive(0.2)
                 if not event: continue
                 kind = event.get("@type", "")
+                if on_update is not None: on_update(event)
                 if kind == "error": raise AuthGate("Existing session failed")
                 state = event.get("authorization_state", {}) if kind == "updateAuthorizationState" else event
                 phase = state.get("@type", "")
@@ -146,7 +147,9 @@ def existing_authenticated_client(profile, library, *, secret_input=None, databa
                     td.send(auth_request(state, config, database, key)); parameters_sent = True
                 elif phase == "authorizationStateReady":
                     from .live import RequestPump
-                    me = RequestPump(td).request("getMe")
+                    pump = RequestPump(td)
+                    if on_update is not None: pump.on_event = on_update
+                    me = pump.request("getMe")
                     if me.get("phone_number") != config["sender_phone"].lstrip("+"):
                         raise AuthGate("Configured sender differs from authenticated account")
                     yield td

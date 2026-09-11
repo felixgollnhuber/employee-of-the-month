@@ -86,3 +86,11 @@ Diese Beobachtungen sind versionsabhängig und belegen keinen öffentlichen API-
 ## Prüfung bei Repository-Anlage
 
 `make check` wurde am 10. September 2026 erfolgreich ausgeführt. Der Swift-Testcode wurde unverändert kopiert und per Dateivergleich geprüft. Apple Swift 6.3.3 meldet bei der Übergabe einer CFString-Variable an `AudioObjectGetPropertyData` eine Warnung zur Bildung eines `UnsafeMutableRawPointer`. Der Build gelingt; die Speicherübergabe sollte vor weiterer Produktisierung überprüft werden. Die Offline-Prüfung führt diese Geräteabfrage nicht aus und ist kein erneuter Laufzeitnachweis dafür.
+
+## Issue #1: Offline-Abnahme am 11. September 2026
+
+Der neue `serve-t3`-Dienst wurde mit 127 Python-Tests geprüft. Neue Fälle decken persistente Folgedialoge, ausbleibende Antworten und Abbrüche, eindeutige Rückgabezuordnung, Doppelupdates, Korrekturen, Vertagung, Zugriffsschutz, Rückrufe und neue Statusgespräche ab. Die T3- und Telegram-Gegenstellen dieser Tests sind Fixtures.
+
+Die geänderte `native/media_runtime.cpp` wurde in `.build/issue-1-native/` neu kompiliert und gegen bereits vorhandene, unveränderte Bibliotheken des separaten Laufzeit-Worktrees gelinkt. Die dort laufende Anwendung und ihr Binary wurden nicht ersetzt. `scripts/check-media-runtime.py --executable .build/issue-1-native/media_runtime` besteht elf echte native Descriptor-/IPC-Prüfungen, einschließlich eingehender Verschlüsselungsrichtung. Der PCM-Selbsttest meldet `pcm_callbacks_verified=true`, `audio_devices_opened=false` und `call_created=false`.
+
+Es wurden keine echten Telegram-Nachrichten, Anrufe, API-Sprachsitzungen oder T3-Entscheidungen für diese neue Abnahme ausgelöst. Die verbleibenden Live-Fälle stehen in [telegram-service.md](telegram-service.md).

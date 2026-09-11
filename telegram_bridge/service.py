@@ -1,0 +1,301 @@
+"""Explicit runtime: one TDLib owner for outbound calls, messages and incoming audio."""
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
+import fcntl
+import os
+import json
+import queue
+import threading
+import time
+
+from .auth import existing_authenticated_client
+from .config import read_profile, require_target, read_private_json, private_directory
+from .control import CallSession, GateError
+from .conversations import ConversationStore, Conversations
+from .live import RequestPump, resolve_target, QueuedMedia
+from .t3 import T3Client
+
+
+class VoiceConversation:
+    def __init__(self, conversations, lock, operation_id=None):
+        self.conversations, self.lock, self.operation_id = conversations, lock, operation_id
+        self.cancelled = lambda: False
+        self.revision = lambda: 0
+        self.coordinator_id = None
+        self.call_id = None
+
+    def __call__(self, transcript, *, revision=None):
+        with self.lock:
+            if self.cancelled(): return 'Das Gespräch ist beendet.'
+            c = self.conversations
+            if self.operation_id is None:
+                c.discover(0)
+            available = c.open_operations()
+            if self.operation_id is not None:
+                operation = c.data['operations'][self.operation_id]
+                if not c.refresh(operation):
+                    return 'Diese Rückfrage ist inzwischen erledigt. Es wurde keine weitere Antwort übertragen.'
+                dialog = c.delegate(operation)
+                dialog.cancelled, dialog.revision = self.cancelled, self.revision
+                dialog.deferred = False
+                # Keep Telegram context across callback and restart, without saving raw audio.
+                combined = getattr(self, 'prior_transcript', operation['transcript']) + transcript
+                if not hasattr(self, 'prior_transcript'):
+                    self.prior_transcript = list(operation['transcript'])
+                try:
+                    result = dialog(combined, revision=revision)
+                    operation['status'] = 'completed' if dialog.completed else 'deferred' if dialog.deferred else 'open'
+                    operation['transcript'] = combined[-30:]
+                    dialog.checkpoint()
+                    return result
+                finally:
+                    dialog.cancelled, dialog.revision = lambda: False, lambda: 0
+            status = c.status_text()
+            shell = c.client.request('/api/orchestration/shell')
+            source = next((t for t in shell.get('threads', []) if t.get('projectId') == c.data['project_id']
+                           and not t.get('archivedAt') and not t.get('deletedAt')), None)
+            if source is None: return status
+            if self.coordinator_id is None:
+                self.coordinator_id = c.client.create_coordinator(c.client.snapshot(source['id'])['thread'])
+            prompt = ('Du bist Mitarbeiter des Monats. Beantworte die Statusfrage kurz auf Deutsch anhand der Daten. '
+                      'Keine Tools oder Projektaktionen. Bei mehreren offenen Vorgängen erst kurz nachfragen. '
+                      'Wähle operation_id nur, wenn die letzte Nutzeraussage den Vorgang eindeutig benennt. '
+                      'Eine Auswahl ist keine fachliche Antwort. JSON: {"reply":"...", "operation_id":null}.\n'
+                      + json.dumps({'status': status, 'operations': [{'id': o['id'], 'title': o['title'],
+                                      'questions': o['dialog']['packet']['questions']} for o in available],
+                                    'transcript': transcript}, ensure_ascii=False))
+            raw = c.client.run_coordinator(self.coordinator_id, prompt, cancelled=self.cancelled)
+            try: result = json.loads(raw)
+            except (TypeError, ValueError): return 'Die Statusauskunft konnte ich gerade nicht verlässlich aufbereiten.'
+            if not isinstance(result, dict) or not isinstance(result.get('reply'), str): return 'Bitte konkretisiere deine Frage.'
+            if self.cancelled() or (revision is not None and self.revision() != revision): return 'Bitte wiederhole deine aktuelle Frage.'
+            selected = result.get('operation_id')
+            if isinstance(selected, str) and selected in {o['id'] for o in available}:
+                self.operation_id = selected
+                operation = c.data['operations'][selected]
+                c.begin_incoming(operation, self.call_id)
+                if self.call_id is not None:
+                    c.data['calls'][str(self.call_id)]['operation_id'] = selected
+                c.store.save()
+            return result['reply'][:1100]
+
+
+class TelegramService:
+    """TDLib always runs on the caller thread; slow T3 work runs on one worker."""
+    def __init__(self, td, conversations, media_factory, *, call_seconds=120, max_calls=1,
+                 delay=180, emit=lambda value: None, clock=time.monotonic):
+        self.td, self.conversations, self.media_factory = td, conversations, media_factory
+        self.call_seconds, self.max_calls, self.delay = call_seconds, max_calls, delay
+        self.emit, self.clock = emit, clock
+        self.lock = threading.RLock()
+        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix='telegram-dialog')
+        self.jobs = []
+        self.outgoing = queue.Queue(maxsize=128)
+        conversations.send = self.outgoing.put_nowait
+        self.session = self.media = self.voice = None
+        self.calls = 0
+        self.next_scan = 0
+        self.stopping = False
+        self.started = clock()
+        self.pending_incoming = None
+        self.seen_calls = set(conversations.data['calls'])
+        self.cancelled_calls = set()
+        self.input_generation = 0
+        self.recovered = False
+
+    def submit(self, fn, callback=lambda value: None):
+        if len(self.jobs) >= 128: raise GateError('service_work_queue_full')
+        def work():
+            with self.lock: return fn()
+        self.jobs.append((self.executor.submit(work), callback))
+
+    def event(self, event):
+        kind = event.get('@type')
+        if kind == 'updateAuthorizationState' and event.get('authorization_state', {}).get('@type') != 'authorizationStateReady':
+            raise GateError('authenticated_session_lost')
+        if kind in ('updateMessageContent', 'updateMessageEdited'):
+            if event.get('chat_id') == self.conversations.data['target_id'] and type(event.get('message_id')) is int:
+                self.td.send({'@type': 'getMessage', 'chat_id': event['chat_id'], 'message_id': event['message_id'],
+                              '@extra': 'edited-conversation-message'})
+        elif kind == 'updateNewMessage' or (kind == 'message' and event.get('@extra') == 'edited-conversation-message'):
+            message = event.get('message', {}) if kind == 'updateNewMessage' else event
+            sender = message.get('sender_id', {})
+            target = self.conversations.data['target_id']
+            if (message.get('chat_id') == target and sender.get('@type') == 'messageSenderUser'
+                    and sender.get('user_id') == target and message.get('is_outgoing') is False):
+                # Text takes precedence over call setup; serialization prevents two decisions racing.
+                if self.session: self.session.end('telegram_text_received')
+                self.input_generation += 1
+                self.submit(lambda: self.conversations.message(message))
+        elif kind in ('updateMessageSendSucceeded', 'updateMessageSendFailed', 'message', 'error'):
+            self.submit(lambda: self.conversations.delivery(event))
+        elif kind == 'updateCall':
+            call = event.get('call', {})
+            identifier = str(call.get('id'))
+            if call.get('state', {}).get('@type') in ('callStateDiscarded', 'callStateError'):
+                self.cancelled_calls.add(identifier)
+            if (call.get('is_outgoing') is False and call.get('state', {}).get('@type') == 'callStatePending'
+                    and identifier not in self.seen_calls):
+                self.seen_calls.add(identifier)
+                if call.get('user_id') == self.conversations.data['target_id'] and call.get('is_video') is False:
+                    if self.session is None and self.pending_incoming is None:
+                        self.pending_incoming = call
+                    # A busy call is left unanswered; never allocate a second media session.
+            if self.pending_incoming and call.get('id') == self.pending_incoming['id']:
+                if call.get('state', {}).get('@type') in ('callStateDiscarded', 'callStateError'):
+                    self.pending_incoming = None
+        if self.session:
+            previous_id = self.session.call_id
+            self.session.handle(event)
+            if previous_id is None and self.session.call_id is not None:
+                call_id, operation_id = self.session.call_id, self.voice.operation_id
+                self.voice.call_id = call_id
+                def remember_outbound():
+                    self.conversations.data['calls'][str(call_id)] = {'operation_id': operation_id, 'incoming': False}
+                    self.conversations.data['operations'][operation_id]['attempt']['call_id'] = call_id
+                    self.conversations.store.save()
+                self.submit(remember_outbound)
+
+    def start_call(self, operation_id=None, incoming=None):
+        if self.stopping or self.session is not None: return
+        if incoming and str(incoming['id']) in self.cancelled_calls: return
+        self.voice = VoiceConversation(self.conversations, self.lock, operation_id)
+        self.media = QueuedMedia(self.media_factory(self.voice))
+        self.session = CallSession(self.td.send, self.media, self.clock)
+        current_session = self.session
+        self.voice.cancelled = lambda: self.stopping or current_session.stopping or current_session.phase in ('ended', 'failed', 'end_unconfirmed')
+        backend = self.media.backend
+        self.voice.revision = lambda: backend.voice.input_revision
+        self.call_deadline = self.clock() + self.call_seconds
+        if incoming:
+            self.voice.call_id = incoming['id']
+            self.session.accept(incoming, self.conversations.data['target_id'], authorized=True, consent=True)
+        else:
+            self.calls += 1
+            self.session.start(self.conversations.data['target_id'], authorized=True, consent=True)
+        self.emit({'conversation_call_started': True, 'operation_id': operation_id, 'incoming': incoming is not None})
+
+    def begin_outgoing(self, identifier, generation):
+        if identifier is None or generation != self.input_generation or self.pending_incoming: return
+        def validate():
+            operation = self.conversations.data['operations'][identifier]
+            return self.conversations.refresh(operation) and operation['status'] == 'open'
+        self.submit(validate, lambda valid: self.start_call(identifier)
+                    if valid and generation == self.input_generation and not self.pending_incoming else None)
+
+    def scan(self):
+        self.conversations.discover(self.delay)
+        self.conversations.poll_dialogs()
+        if not self.recovered:
+            self.conversations.recover()
+            self.recovered = True
+        if self.calls < self.max_calls and self.pending_incoming is None:
+            return self.conversations.reserve_attempt(self.delay)
+        return None
+
+    def tick(self):
+        for future, callback in list(self.jobs):
+            if not future.done(): continue
+            self.jobs.remove((future, callback))
+            callback(future.result())
+        while True:
+            try: request = self.outgoing.get_nowait()
+            except queue.Empty: break
+            self.td.send(request)
+        if self.session:
+            self.media.drain()
+            self.session.tick()
+            if self.clock() >= self.call_deadline: self.session.end('maximum_duration')
+            if self.session.phase in ('ended', 'failed', 'end_unconfirmed'):
+                status, identifier = self.session.status(), self.voice.operation_id
+                self.session._stop_media()
+                self.session = self.media = self.voice = None
+                if status['phase'] == 'end_unconfirmed' or status.get('media_cleanup_confirmed') is False:
+                    raise GateError('service_call_cleanup_unconfirmed')
+                if identifier and self.conversations.data['operations'][identifier]['attempt']:
+                    self.submit(lambda: self.conversations.finish_attempt(identifier, status))
+        if self.session is None and not self.jobs and self.pending_incoming:
+            call, self.pending_incoming = self.pending_incoming, None
+            def remember_call():
+                self.conversations.data['calls'][str(call['id'])] = {'operation_id': None, 'incoming': True}
+                self.conversations.store.save()
+            self.submit(remember_call, lambda _: self.start_call(incoming=call))
+        elif self.session is None and not self.jobs and self.clock() >= self.next_scan:
+            self.next_scan = self.clock() + 2
+            generation = self.input_generation
+            self.submit(self.scan, lambda identifier: self.begin_outgoing(identifier, generation))
+
+    def close(self):
+        self.stopping = True
+        if self.session:
+            self.session.end('service_exit')
+            deadline = self.clock() + 5
+            while self.clock() < deadline and self.session.phase not in ('ended', 'failed', 'end_unconfirmed'):
+                event = self.td.receive(.1)
+                if event: self.session.handle(event)
+                self.session.tick()
+        self.executor.shutdown(wait=True, cancel_futures=True)
+
+
+@contextmanager
+def watcher_lease(profile):
+    private_directory(profile)
+    descriptor = os.open(profile / 'watch.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, 'w') as lock:
+        try: fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError: raise GateError('existing_project_watcher_must_be_stopped') from None
+        yield
+
+
+def run_service(profile, library, project_id, *, authorized=False, seconds=3600, call_seconds=120,
+                max_calls=1, question_delay=180, secret_input=None, emit=lambda value: None, native_executable=None):
+    if authorized is not True: raise GateError('explicit_service_authorization_required')
+    if (type(seconds) is not int or not 1 <= seconds <= 86400 or type(call_seconds) is not int
+            or not 1 <= call_seconds <= 180 or type(max_calls) is not int or not 0 <= max_calls <= 20
+            or type(question_delay) is not int or not 0 <= question_delay <= 3600):
+        raise GateError('bounded_service_settings_required')
+    client = T3Client.from_profile(profile)
+    if not any(p.get('id') == project_id for p in client.request('/api/orchestration/shell').get('projects', [])):
+        raise GateError('explicit_t3_project_required')
+    config = read_private_json(profile, 'live.json')
+    from .live_voice import LivePcmMedia, DEFAULT_VOICE
+    def media_factory(delegate):
+        instructions = (
+            'Du bist Mitarbeiter des Monats, Felix\' KI-Kollege. Sprich natürlich und knapp Deutsch. '
+            'Frage zunächst, worum es geht. Hole Aufgabenstatus und Rückfragen ausschließlich vom Backend. '
+            'Delegiere jede inhaltliche Aussage. Bestätige Rückgaben nur nach dem Backend-Ergebnis. '
+            'Bei jetzt nicht respektiere die Vertagung. Bei einer Auflegebitte verabschiede dich kurz.')
+        if delegate.operation_id:
+            from .application import instructions_for_handoff
+            instructions = instructions_for_handoff(delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'])
+        return LivePcmMedia(config.get('api_key'), instructions=instructions,
+            authorized=True, max_seconds=call_seconds, delegate=delegate, emit=emit,
+            voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable)
+    # existing_authenticated_client holds session.lock for this entire lifetime.
+    startup_events = []
+    def buffer(event):
+        if event.get('@type') in ('updateNewMessage', 'updateCall', 'updateNewCallSignalingData',
+                                  'updateMessageContent', 'updateMessageEdited',
+                                  'updateMessageSendSucceeded', 'updateMessageSendFailed'):
+            if len(startup_events) >= 512: raise GateError('service_startup_buffer_full')
+            startup_events.append(event)
+    with watcher_lease(profile), existing_authenticated_client(profile, library, secret_input=secret_input, on_update=buffer) as td:
+        pump = RequestPump(td)
+        pump.on_event = buffer
+        target = resolve_target(pump, require_target(read_profile(profile)))
+        store = ConversationStore(profile, project_id, target.user_id)
+        conversations = Conversations(store, client, lambda request: None, emit=emit)
+        service = TelegramService(td, conversations, media_factory, call_seconds=call_seconds,
+                                  max_calls=max_calls, delay=question_delay, emit=emit)
+        emit({'telegram_service_started': True, 'project_id': project_id})
+        try:
+            for event in startup_events: service.event(event)
+            startup_events.clear()
+            deadline = time.monotonic() + seconds
+            while time.monotonic() < deadline:
+                event = td.receive(.1)
+                if event: service.event(event)
+                service.tick()
+        finally:
+            service.close()
+            emit({'telegram_service_stopped': True})

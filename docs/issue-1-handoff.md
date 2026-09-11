@@ -12,9 +12,11 @@ Issue: https://github.com/felixgollnhuber/codex-phone-bridge/issues/1
 - Ein Projektwächter erfasst auch neu angelegte Threads dieses T3-Projekts. Der Arbeits-Thread benötigt dafür keine Telefonlogik.
 - 100 Offline-Tests. Echte Telefongespräche, Auflegen und Rückfragenkette wurden geprüft; die genauen Aussagegrenzen stehen in `docs/evidence.md`.
 
-## Noch umzusetzen
+## Implementierung von Issue #1
 
-Die in Issue #1 beschriebenen Telegram-Folgenachrichten bei Nichterreichbarkeit, mehrteilige Textdialoge, Rückrufe und allgemein eingehende Statusanrufe sind noch nicht implementiert. Der vorhandene `T3Delegation`-Dialog ist ein Ausgangspunkt, ersetzt aber keinen eingehenden Telegram-Dienst oder dauerhaft gespeicherten Gesprächszustand.
+`serve-t3` ergänzt Telegram-Folgenachrichten, mehrteilige Textdialoge, Rückrufe und eingehende Statusanrufe. Vorgänge und Versandzustand werden privat und dauerhaft gespeichert. Der gemeinsame Dienst hält `watch.lock` und `session.lock` und übernimmt bekannte Kontaktversuche des bisherigen Wächters. Verhalten, Start und Fehlerfälle stehen in [telegram-service.md](telegram-service.md).
+
+Die Implementierung wurde mit 127 Offline-Tests, elf nativen Descriptor-/IPC-Prüfungen und dem nativen PCM-Selbsttest geprüft. Eine neue native Laufzeit wurde separat kompiliert und gelinkt. Der vorhandene Wächter und seine Laufzeit wurden nicht verändert oder gestoppt. Die echte Abnahme der neuen Nachrichten- und eingehenden Audioabläufe bleibt offen; Issue #1 ist deshalb noch nicht vollständig live abgenommen.
 
 ## Laufzeit und Entwicklungsstand
 

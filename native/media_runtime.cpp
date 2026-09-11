@@ -84,12 +84,12 @@ public:
 };
 
 tgcalls::Descriptor descriptor(const Json &data, const std::shared_ptr<PcmChannel> &pcm) {
-    if (requiredString(data, "version") != "12.0.0" || !data["outgoing"].is_bool() || !data["outgoing"].bool_value())
+    if (requiredString(data, "version") != "12.0.0" || !data["outgoing"].is_bool())
         throw std::runtime_error("unsupported_version_or_direction");
     auto bytes = unhex(requiredString(data, "key_hex", 512), 256);
     auto key = std::make_shared<std::array<uint8_t, 256>>();
     std::copy(bytes.begin(), bytes.end(), key->begin());
-    tgcalls::Descriptor d{.encryptionKey = tgcalls::EncryptionKey(key, true)};
+    tgcalls::Descriptor d{.encryptionKey = tgcalls::EncryptionKey(key, data["outgoing"].bool_value())};
     d.version = "12.0.0";
     d.mediaDevicesConfig.audioInputId = requiredString(data, "input_uid", 256);
     d.mediaDevicesConfig.audioOutputId = requiredString(data, "output_uid", 256);

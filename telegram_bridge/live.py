@@ -22,6 +22,7 @@ class RequestPump:
         self.clock = clock
         self.on_update = lambda event: None
         self.on_tick = lambda: None
+        self.on_event = lambda event: None
 
     def request(self, kind, timeout=10, **fields):
         tag = "rpc-" + uuid.uuid4().hex
@@ -39,6 +40,7 @@ class RequestPump:
     def step(self):
         event = self.td.receive(0.1)
         if event:
+            self.on_event(event)
             if event.get("@type") == "updateAuthorizationState":
                 state = event.get("authorization_state", {}).get("@type")
                 if state != "authorizationStateReady":
