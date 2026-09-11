@@ -20,6 +20,33 @@ from .handoff import Handoff, prepare_handoff, prepare_answer, pending_requests
 def now(): return datetime.now(timezone.utc).isoformat()
 
 
+COORDINATOR_TITLE = "Telefonbrücke - Gesprächskoordination"
+SETTLE_TERMINAL = ("settled", "already_settled", "unavailable")
+
+
+def is_coordinator_thread(thread):
+    """Only threads the bridge created for call coordination carry this title prefix."""
+    return isinstance(thread, dict) and str(thread.get("title", "")).startswith(COORDINATOR_TITLE)
+
+
+def settle_command_id(coordinator_id, conversation_id, attempt):
+    # T3 keeps a receipt per command ID and rejects a previously rejected ID for
+    # good, so every attempt gets its own ID; the outcome stays idempotent.
+    return "phone-settle-" + uuid.uuid5(uuid.NAMESPACE_URL,
+        json.dumps([coordinator_id, conversation_id, int(attempt)])).hex
+
+
+def blocking_requests(thread):
+    """Open approvals or user-input requests; T3 refuses to settle a thread that has any."""
+    open_ids = set()
+    for activity in thread.get("activities", []):
+        request_id = (activity.get("payload") or {}).get("requestId")
+        if not isinstance(request_id, str): continue
+        if activity.get("kind") in ("approval.requested", "user-input.requested"): open_ids.add(request_id)
+        elif activity.get("kind") in ("approval.resolved", "user-input.resolved"): open_ids.discard(request_id)
+    return open_ids
+
+
 def selected_context(thread):
     """Bounded recent task context, excluding tool output and common secret forms."""
     messages=[m for m in thread.get('messages',[]) if m.get('role') in ('user','assistant') and not m.get('streaming')]
@@ -124,13 +151,33 @@ class T3Client:
             raise GateError('t3_metadata_unavailable') from None
         raise GateError('t3_metadata_timeout')
 
-    def create_coordinator(self, source, *, title="Telefonbrücke - Gesprächskoordination", interaction_mode="default"):
+    def create_coordinator(self, source, *, title=COORDINATOR_TITLE, interaction_mode="default"):
         identifier = str(uuid.uuid4())
         self.dispatch({"type":"thread.create", "commandId":str(uuid.uuid4()), "threadId":identifier,
             "projectId":source["projectId"], "title":title,
             "modelSelection":source["modelSelection"], "runtimeMode":"approval-required", "interactionMode":interaction_mode,
             "branch":source.get("branch"), "worktreePath":source.get("worktreePath"), "createdAt":now()})
         return identifier
+
+    def settle_coordinator(self, thread_id, command_id, *, wait=3, sleep=time.sleep):
+        """Mark an ended call's coordination thread as settled in T3. Never touches work threads.
+
+        Returns settled, already_settled, unavailable (archived or deleted), busy (a turn or
+        session is still live), blocked (open approval or user input) or unconfirmed."""
+        thread = self.snapshot(thread_id)["thread"]
+        if not is_coordinator_thread(thread): raise GateError("t3_settle_target_not_coordinator")
+        if thread.get("archivedAt") or thread.get("deletedAt"): return "unavailable"
+        if thread.get("settledOverride") == "settled" and thread.get("settledAt"): return "already_settled"
+        if ((thread.get("session") or {}).get("status") in ("starting", "running")
+                or (thread.get("latestTurn") or {}).get("state") == "running"): return "busy"
+        if blocking_requests(thread): return "blocked"
+        self.dispatch({"type":"thread.settle", "commandId":command_id, "threadId":thread_id})
+        deadline = time.monotonic() + wait
+        while True:
+            thread = self.snapshot(thread_id)["thread"]
+            if thread.get("settledOverride") == "settled": return "settled"
+            if time.monotonic() >= deadline: return "unconfirmed"
+            sleep(0.2)
 
     def run_coordinator(self, thread_id, prompt, *, cancelled=lambda:False, timeout=75):
         previous_turn = (self.snapshot(thread_id)["thread"].get("latestTurn") or {}).get("turnId")
@@ -183,6 +230,22 @@ class T3Client:
             if fresh or (settled and changed_assistant_reply(source,baseline)):return snapshot
             if cancelled() or time.monotonic()>=deadline:return snapshot
             time.sleep(.2)
+
+
+def settle_after_call(client, coordinator_id, *, conversation_id, emit=lambda value:None,
+                      attempts=5, sleep=time.sleep):
+    """Bounded settle for single-call runners (call, watch-t3). A failure never fails the call."""
+    if not coordinator_id: return None
+    result = None
+    for attempt in range(attempts):
+        try: result = client.settle_coordinator(coordinator_id, settle_command_id(coordinator_id, conversation_id, attempt))
+        except GateError as error:
+            result = "error:" + str(error)
+            if str(error) == "t3_settle_target_not_coordinator": break
+        if result in SETTLE_TERMINAL: break
+        if attempt + 1 < attempts: sleep(2)
+    emit({"t3_coordinator_settle": result, "t3_coordinator_thread": coordinator_id})
+    return result
 
 
 def parse_coordinator(text, transcript):

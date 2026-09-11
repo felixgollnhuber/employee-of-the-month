@@ -213,10 +213,16 @@ def main():
             delegate = T3Delegation(T3Client.from_profile(profile_path(args.profile)), args.t3_thread,
                                     args.t3_request, context=context, emit=emit)
             instructions = instructions_for_handoff(delegate.packet)
-        result = run_authorized_live_test(profile_path(args.profile), args.library,
-            authorized=True, max_seconds=args.seconds,
-            secret_input=macos_passphrase if args.passphrase_dialog else None, emit=emit,
-            delegate=delegate, instructions=instructions)
+        try:
+            result = run_authorized_live_test(profile_path(args.profile), args.library,
+                authorized=True, max_seconds=args.seconds,
+                secret_input=macos_passphrase if args.passphrase_dialog else None, emit=emit,
+                delegate=delegate, instructions=instructions)
+        finally:
+            if delegate is not None:
+                from .t3 import settle_after_call
+                settle_after_call(delegate.client, delegate.coordinator_id,
+                                  conversation_id=args.t3_thread+':'+args.t3_request, emit=emit)
         return 0 if result["phase"] == "ended" else 2
     elif args.command == "serve-t3":
         if not args.allow_messages_and_calls:

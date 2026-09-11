@@ -1,6 +1,6 @@
 # Dauerhafter Sprachagent für alle T3-Projekte
 
-Seit dem 11. September 2026 ist der gemeinsame Dienst auf diesem Mac aktiviert. Er überwacht alle Projekte der verbundenen T3-Instanz, einschließlich PeakShare. Neu angelegte Projekte und Threads werden beim nächsten Durchlauf automatisch berücksichtigt. Archivierte Threads und interne Gesprächskoordinatoren werden nicht automatisch angerufen.
+Seit dem 11. September 2026 ist der gemeinsame Dienst auf diesem Mac aktiviert. Er überwacht alle Projekte der verbundenen T3-Instanz, einschließlich PeakShare. Neu angelegte Projekte und Threads werden beim nächsten Durchlauf automatisch berücksichtigt. Archivierte Threads und interne Gesprächskoordinatoren werden nicht automatisch angerufen. Nach dem vollständigen Ende eines Telefongesprächs werden dessen Gesprächskoordinatoren automatisch als settled markiert; siehe den Abschnitt Settled-Status in [telegram-service.md](telegram-service.md).
 
 ## Anrufe, Dialoge und Status
 
@@ -45,6 +45,7 @@ Ein einzelnes Gespräch ist auf ausdrücklichen Nutzerwunsch auf 1200 Sekunden (
 - 156 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
 - Gegen echtes T3 wurde ein synthetischer Auftrag in einem eigenen Git-Testprojekt gestartet. Mit der vorgeschlagenen Provider-/Modellauswahl entstand eine Begrüßungsfunktion samt unittest; der Test wurde unabhängig erneut erfolgreich ausgeführt. Dieser Nachweis belegt den echten Thread-/Implementierungspfad, nicht die sprachliche Erkennung eines neuen Feature-Auftrags.
 - Die zuvor gemeinsam geprüften echten Telegram-Dialoge, Rückrufe, Statusanrufe und Auflegebitten bleiben in [evidence.md](evidence.md) dokumentiert.
+- Der automatische Settled-Status der Koordinatoren ist mit 170 Offline-Tests geprüft und im laufenden Dienst mit einem echten Settle-Befehl belegt; der Ablauf und die Textdialog-Einschränkung stehen in [evidence.md](evidence.md).
 
 Die vollständige Auftragsberatung wurde zusätzlich mit einem synthetischen Transkript gegen den echten T3-Koordinator geprüft: Für eine kleine Funktion schlug er Codex-1, GPT-5.6-Luna und Reasoning low vor, mit konkreter Restkapazität und Begründung. Der Vorschlag erzeugte noch keinen Arbeits-Thread und wurde nach der Prüfung verworfen. Ein dabei gefundener Altprojekt-Fall mit fehlendem Arbeitsverzeichnis wurde korrigiert: Gesprächskoordinatoren verwenden nur vorhandene Git-Arbeitsverzeichnisse.
 

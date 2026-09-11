@@ -25,6 +25,30 @@ Der Dienst übernimmt zu noch offenen Fragen vorhandene Einträge aus `watch-att
 
 Ein Verlust der Anmeldung, ein unbestätigtes Gesprächsende oder eine unbestätigte Medienbereinigung stoppt den Dienst. Nach Prüfung ist ein expliziter Neustart möglich. Eine unklare T3-Mutation wird nicht durch Wiederholung einer Telegram-Nachricht erneut ausgeführt. Nachrichten aus der Zeit vor der erstmaligen Dienstaktivierung werden ignoriert.
 
+## Settled-Status der Koordinations-Threads
+
+Jedes Telefongespräch erzeugt in T3 höchstens zwei Arten technischer Threads mit dem Titel „Telefonbrücke - Gesprächskoordination“: den Status-Koordinator des Gesprächs und je behandeltem Vorgang den Rückfrage-Koordinator. Sobald das Telefongespräch vollständig beendet ist, markiert der Dienst diese Threads über den vorhandenen T3-Befehl `thread.settle` als settled. Sie verschwinden damit aus der aktiven T3-Übersicht, bleiben aber unarchiviert und für Rückrufe wiederverwendbar. Fachliche Ziel- und Arbeits-Threads werden nie automatisch verändert: Der Befehl geht nur an Thread-IDs, die die Brücke selbst angelegt hat, und vor jedem Befehl wird zusätzlich der Thread-Titel geprüft. Ein Thread ohne diesen Titel wird ohne Wiederholung verworfen.
+
+| Gesprächsende | Erkennung | Settled-Verhalten |
+| --- | --- | --- |
+| Regulär beendet: Auflegen, gesprochene Auflegebitte, Zeitlimit, Dienstende | Sitzungsphase `ended` | Status- und Vorgangs-Koordinator werden dauerhaft vorgemerkt und beim nächsten Leerlauf-Durchlauf gesettelt. |
+| Unterbrochen: Nichtabheben, Ablehnung, Netzverlust, Telegram-Antwort während des Aufbaus | Sitzungsphase `ended` mit Grund, zum Beispiel `startup_timeout` oder `telegram_text_received` | Wie regulär beendet. Der Grund wird mit der Vormerkung gespeichert. |
+| Fehlerhaft beendet: Medienfehler, Aufbau- oder Annahmefehler | Sitzungsphase `failed` | Wie regulär beendet. |
+| Dienstende während eines Gesprächs | `close()` beendet den Anruf | Vormerkung erfolgt nach dem Stopp des Arbeitsthreads; der nächste Dienststart führt sie aus. |
+| Absturz oder Neustart während eines Gesprächs | Wiederanlauf: Vorgang mit offenem Kontaktversuch, Gesprächsjournal mit Zustand `interrupted` | Beim ersten Durchlauf nach dem Start vorgemerkt, Grund `service_restart`. |
+| Unbestätigtes Ende oder unbestätigte Medienbereinigung | `end_unconfirmed` stoppt den Dienst | Die Vormerkung wird noch abgesetzt, kann aber beim erzwungenen Stopp verloren gehen. Der nächste Start holt sie über Vorgang und Gesprächsjournal nach. |
+
+Die Vormerkungen liegen als `settle_queue` in `conversations.json`, je Koordinator genau ein Eintrag. Ein späterer Anruf mit demselben Koordinator ersetzt den Eintrag; ein bereits gesetteltes Ziel wird ohne neuen Befehl übersprungen. Der Befehl selbst läuft ausschließlich im Leerlauf-Durchlauf des serialisierten Arbeitsthreads, also nie während eines laufenden Gesprächs und nie parallel zu Telegram-Nachrichten. Vor dem Befehl prüft die Brücke dieselben Bedingungen wie der T3-Server: archivierte oder gelöschte Threads gelten als erledigt; laufende Sitzungen oder Turns, offene Genehmigungen oder Rückfragen führen zu einem Wiederholungsversuch nach 30 Sekunden. Jeder Versuch verwendet eine neue Command-ID, weil T3 eine einmal abgelehnte ID dauerhaft ablehnt. Nach 30 Minuten ohne Erfolg wird der Eintrag mit dem Ereignis `coordinator_settle_abandoned` aufgegeben; das Gespräch selbst ist davon nie betroffen. Nach dem Befehl wird der Status über den Thread-Snapshot bestätigt.
+
+Wenn eine spätere Textantwort oder ein Rückruf denselben Vorgangs-Koordinator weiterverwendet, startet ein neuer Turn. T3 hebt den Settled-Status bei dieser Aktivität serverseitig wieder auf; nach dem Ende dieses Gesprächs wird er erneut gesetzt. Die Einzelbefehle `call` und `watch-t3` setteln ihren Koordinator direkt nach dem Anruf mit höchstens fünf Versuchen ohne dauerhafte Warteschlange.
+
+Verbleibende Einschränkungen:
+
+- Nur Telefongespräche lösen den Settled-Status aus. Nach einer reinen Telegram-Textantwort bleibt der Vorgangs-Koordinator aktiv, und der Text-Status-Koordinator (`status_coordinator`) wird nie automatisch gesettelt.
+- Ein Koordinator mit offener Genehmigungsanfrage kann nicht gesettelt werden und wird nach 30 Minuten aufgegeben. Ein beim Gesprächsende noch laufender Koordinator-Turn wird nicht unterbrochen, sondern nur später erneut geprüft.
+- Bei einem Absturz ohne journalisierte Koordinator-ID gibt es nichts nachzuholen; ein solcher Thread bleibt aktiv.
+- Der Befehl wurde gegen die Contracts und den Decider der lokalen T3-Quelle (`t3code`, Revision `a04198127`) und offline gegen Test-Doubles geprüft. Ein Settle-Durchlauf gegen die laufende T3-Instanz wurde nicht ausgeführt.
+
 ## Bewusster Laufzeitstart
 
 Der Befehl versendet echte Nachrichten, kann ausgehende Anrufe starten und nimmt eingehende Anrufe des konfigurierten Kontos mit kostenpflichtigem GPT-Live-Audio an. Er gehört nicht zu `make check`.

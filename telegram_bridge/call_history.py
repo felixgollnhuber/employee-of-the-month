@@ -75,6 +75,12 @@ class CallHistory:
     def finish(self, identifier, status):
         self.update(identifier, state='ended', ended_at=timestamp(), end_status=dict(status))
 
+    def settle_candidates(self):
+        """Ended or interrupted calls whose status coordinator was never handed to the settle queue."""
+        with self.lock:
+            return [(c['id'], c['coordinator_id']) for c in self.data['calls']
+                    if c.get('state') != 'active' and c.get('coordinator_id') and not c.get('coordinator_settle')]
+
     def recent(self, exclude=None):
         with self.lock:
             calls = copy.deepcopy([c for c in self.data['calls'] if c['id'] != exclude][-5:])

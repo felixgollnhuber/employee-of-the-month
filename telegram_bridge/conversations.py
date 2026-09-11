@@ -12,7 +12,7 @@ from datetime import datetime
 from .config import private_directory, read_private_json
 from .control import GateError
 from .handoff import pending_requests, _pending
-from .t3 import T3Delegation, selected_context
+from .t3 import T3Delegation, selected_context, is_coordinator_thread, settle_command_id, SETTLE_TERMINAL
 from .watch import question_due
 
 
@@ -68,7 +68,55 @@ class Conversations:
         return [p for p in shell.get('projects', []) if self.in_scope(p.get('id')) and not p.get('deletedAt')]
 
     def is_internal(self, thread):
-        return thread.get('title', '').startswith('Telefonbrücke - Gesprächskoordination')
+        return is_coordinator_thread(thread)
+
+    SETTLE_RETRY_SECONDS = 30
+    SETTLE_GIVE_UP_SECONDS = 1800
+
+    def request_settle(self, coordinator_id, *, conversation_id, reason):
+        """Durably note that the phone conversation behind a coordination thread has fully ended.
+
+        Idempotent per coordinator: a later call on the same coordinator refreshes the entry.
+        The actual T3 command runs from settle_coordinators, never during a live call."""
+        if not isinstance(coordinator_id, str) or not coordinator_id: return
+        queue = self.data.setdefault('settle_queue', {})
+        previous = queue.get(coordinator_id) or {}
+        queue[coordinator_id] = {'conversation_id': conversation_id, 'reason': reason,
+                                 'requested_at': time.time(), 'attempts': 0, 'next_attempt_at': 0,
+                                 'history': previous.get('history', [])[-4:]}
+        self.store.save()
+
+    def settle_coordinators(self, current_time=None):
+        """Settle queued coordination threads in T3. Runs only between calls on the worker."""
+        queue = self.data.get('settle_queue') or {}
+        current_time = time.time() if current_time is None else current_time
+        for coordinator_id, entry in list(queue.items()):
+            if entry['next_attempt_at'] > current_time: continue
+            command_id = settle_command_id(coordinator_id, entry['conversation_id'], entry['attempts'])
+            try: result = self.client.settle_coordinator(coordinator_id, command_id)
+            except GateError as error: result = 'error:' + str(error)
+            entry['attempts'] += 1
+            entry['history'] = (entry.get('history') or [])[-4:] + [result]
+            done = result in SETTLE_TERMINAL or result == 'error:t3_settle_target_not_coordinator'
+            if not done and current_time - entry['requested_at'] >= self.SETTLE_GIVE_UP_SECONDS:
+                done = True
+                self.emit({'coordinator_settle_abandoned': True, 'coordinator_id': coordinator_id, 'last_result': result})
+            if done:
+                del queue[coordinator_id]
+                self.emit({'coordinator_settled': result in SETTLE_TERMINAL, 'coordinator_id': coordinator_id,
+                           'result': result, 'reason': entry['reason']})
+            else: entry['next_attempt_at'] = current_time + self.SETTLE_RETRY_SECONDS
+            self.store.save()
+
+    def settle_operation_coordinator(self, operation, reason):
+        """The call attempt for this operation is over; its coordination thread may settle."""
+        attempt = operation.get('attempt')
+        if not attempt or attempt.get('coordinator_settle_requested'): return
+        coordinator_id = self.delegate(operation).coordinator_id
+        attempt['coordinator_settle_requested'] = True
+        self.store.save()
+        if coordinator_id:
+            self.request_settle(coordinator_id, conversation_id=attempt['id'], reason=reason)
 
     def project_title(self, operation):
         return operation.get('project_title') or operation['dialog']['project_id']
@@ -226,6 +274,7 @@ class Conversations:
         operation['attempt']['reason'] = status.get('reason')
         operation['attempt']['call_id'] = status.get('call_id', operation['attempt'].get('call_id'))
         self.store.save()
+        self.settle_operation_coordinator(operation, status.get('reason') or status['phase'])
         if (not self.refresh(operation) or operation['status'] != 'open'
                 or operation['first_message'] is not None or operation['attempt'].get('followup_suppressed')): return
         questions = ' '.join(q['question'] for q in self.delegate(operation).packet['questions'])
