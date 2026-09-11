@@ -41,7 +41,7 @@ def contextual_send(text):
         return False, None
     if re.search(
             rf'(?is)\b{verb}\s+(?:bitte\s+)?{there}\s+'
-            r'(?:nichts|keine\s+(?:Nachricht|Folgenachricht))\b', text):
+            r'(?:nicht\b|nichts\b|keine\s+(?:Nachricht|Folgenachricht)\b)', text):
         return False, None
     match = re.search(
         rf'(?is)\b{verb}\s+(?:bitte\s+)?'
@@ -52,8 +52,8 @@ def contextual_send(text):
             rf'(?P<message>.+?)\s+{there}(?:\s+hin)?[.!?]?\s*$', text)
     if match:
         message = match['message'].strip()
-        structural = re.fullmatch(r'(?is)(?P<message>\S+)\s+hin[.!?]?', message)
-        if structural and structural['message'].casefold() not in {'geh', 'komm'}:
+        structural = re.fullmatch(r'(?is)(?P<message>\S+)\s+hin\.', message)
+        if structural:
             message = structural['message'].strip()
         return True, message
     intent = bool(re.search(rf'(?is)\b{verb}\b', text) and re.search(rf'(?is)\b{there}\b', text))
@@ -104,16 +104,31 @@ class Followups:
         folded = text.casefold()
         result = []
         for thread in shell.get('threads', []):
-            if thread.get('projectId') not in projects or self.c.is_internal(thread):
+            if (thread.get('projectId') not in projects or self.c.is_internal(thread)
+                    or thread.get('deletedAt') or thread.get('archivedAt')):
                 continue
             identifier = str(thread.get('id', ''))
             title = str(thread.get('title', ''))
-            id_match = bool(identifier and re.search(r'(?<!\w)' + re.escape(identifier.casefold()) + r'(?!\w)', folded))
-            title_match = bool(title and re.search(
-                r'(?<!\w)' + re.escape(title.casefold()) + r'(?!\w)', folded))
+            id_match = bool(identifier and re.search(
+                r'(?<![A-Za-z0-9_-])' + re.escape(identifier.casefold()) + r'(?![A-Za-z0-9_-])', folded))
+            title_folded = title.casefold()
+            bare = folded.strip().strip('"„“»« .!?') == title_folded
+            quoted = bool(title and re.search(
+                r'["„“»«]\s*' + re.escape(title_folded) + r'\s*["„“»«]', folded))
+            addressed = bool(title and re.search(
+                r'\bthreads?\b\s*["„“»«]?\s*' + re.escape(title_folded) + r'(?!\w)', folded))
+            title_match = bare or quoted or addressed
             if id_match or title_match:
                 result.append({**thread, 'project_title': projects[thread['projectId']].get('title', thread['projectId'])})
         return result
+
+    def matching_targets(self, target):
+        shell = self.c.client.request('/api/orchestration/shell')
+        projects = {p['id']: p for p in self.c.projects(shell)}
+        return [{**thread, 'project_title': projects[thread['projectId']].get('title', thread['projectId'])}
+                for thread in shell.get('threads', []) if thread.get('projectId') in projects
+                and not thread.get('deletedAt') and not thread.get('archivedAt') and not self.c.is_internal(thread)
+                and target.casefold() in (thread['id'].casefold(), thread.get('title', '').casefold())]
 
     @staticmethod
     def ambiguous_reply(candidates):
@@ -132,14 +147,9 @@ class Followups:
             if existing['input'] != input_text:
                 raise GateError('followup_event_conflict')
             return self.receipt(existing)
-        shell = self.c.client.request('/api/orchestration/shell')
-        projects = {p['id']: p for p in self.c.projects(shell)}
-        candidates = [t for t in shell.get('threads', []) if t.get('projectId') in projects
-                      and not t.get('deletedAt') and not t.get('archivedAt') and not self.c.is_internal(t)
-                      and spec['target'].casefold() in (t['id'].casefold(), t.get('title', '').casefold())]
+        candidates = self.matching_targets(spec['target'])
         if len(candidates) != 1:
-            choices = [{**t, 'project_title': projects[t['projectId']].get('title', t['projectId'])} for t in candidates]
-            return (self.ambiguous_reply(choices) if candidates
+            return (self.ambiguous_reply(candidates) if candidates
                     else 'Diesen T3-Thread kann ich nicht eindeutig finden. Es wurde nichts gesendet.')
         target = candidates[0]
         snapshot = self.c.client.snapshot(target['id'])

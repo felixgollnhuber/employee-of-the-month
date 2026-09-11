@@ -15,7 +15,7 @@ Bei einer expliziten Einzelaussage stehen Ziel und Nachrichteninhalt weiterhin z
 
 ## Natürlicher Gesprächskontext
 
-Im Telefongespräch darf Felix Ziel und Inhalt auch natürlich über mehrere Aussagen festlegen. Die Brücke merkt ausschließlich einen im aktuellen Nutzertranskript exakt genannten vollständigen Thread-Titel oder eine Thread-ID. Diese sitzungsgebundene Auswahl gilt höchstens vier weitere Nutzeraussagen und wird bei einem anderen exakt genannten Thread ersetzt. Historische Anrufe, der zuletzt aktive Vorgang, Titelähnlichkeit oder die Reihenfolge der T3-Shell dürfen kein Ziel auswählen.
+Im Telefongespräch darf Felix Ziel und Inhalt auch natürlich über mehrere Aussagen festlegen. Die Brücke merkt ausschließlich einen im aktuellen Nutzertranskript eindeutig als Thread-Referenz genannten vollständigen Titel oder eine exakt abgegrenzte Thread-ID. Ein Titel gilt als Referenz, wenn er nach dem Wort „Thread“, in Anführungszeichen oder als vollständige Antwort auf die Zielrückfrage steht. Ein bloßes Wortvorkommen im übrigen Satz reicht nicht. Archivierte und gelöschte Threads sind bereits von dieser Auswahl ausgeschlossen. Diese sitzungsgebundene Auswahl gilt höchstens vier weitere Nutzeraussagen und wird bei einem anderen exakt genannten Thread ersetzt. Historische Anrufe, der zuletzt aktive Vorgang, Titelähnlichkeit oder die Reihenfolge der T3-Shell dürfen kein Ziel auswählen.
 
 Beispiele:
 
@@ -25,7 +25,7 @@ Beispiele:
 - Fehlt der Inhalt, fragt die Brücke nach der Nachricht und verwendet die nächste eindeutige Antwort als Inhalt.
 - Bei gleichen Titeln nennt die Brücke die passenden Projekte und IDs. Die anschließende Auswahl per ID setzt den begonnenen Sendewunsch fort.
 
-Diese Kontextbindung gilt nur innerhalb des laufenden Telefonats. Telegram-Text ohne Gesprächssitzung verwendet weiterhin die explizite Einzelaussage. Ein Themenwechsel zu einem T3-Rückfragevorgang oder neuen Auftragsvorschlag verwirft die Bindung. „Mach das“ ohne eindeutig gebundenes Ziel und Inhalt löst keine Folgenachricht aus.
+Diese Kontextbindung gilt nur innerhalb des laufenden Telefonats. Telegram-Text ohne Gesprächssitzung verwendet weiterhin die explizite Einzelaussage. Eine Statusfrage, eine andere fachliche Antwort, ein T3-Rückfragevorgang oder ein neuer Auftragsvorschlag verwirft den vorbereiteten Inhalt und verhindert dessen spätere Wiederbelebung aus älteren Transkriptteilen. „Mach das“ ohne eindeutig gebundenes Ziel und Inhalt löst keine Folgenachricht aus. Der erkannte Nachrichteninhalt wird nicht auf Thread-Titel durchsucht und nicht still umformuliert.
 
 ## Getrennte Dialogwege
 

@@ -66,6 +66,7 @@ class VoiceConversation:
         intent, message = contextual_send(current)
         confirmed = contextual_confirmation(current)
         declared = contextual_message(current)
+        was_awaiting_message = bool(context and context.get('awaiting_message'))
         if context and not intent and not declared and re.search(
                 r'(?i)\b(?:status|fortschritt|probleme)\b|wie\s+läuft', current):
             self.discard_followup_context(user_turn)
@@ -127,13 +128,16 @@ class VoiceConversation:
                 intent = bool(message)
         if context and message:
             context['text'] = message
-        if context and context.get('awaiting_target') and selected_now and len(context['targets']) == 1:
+        if context and context.get('awaiting_target') and selected_now:
             intent = True
-            context['awaiting_target'] = False
+            if len(context['targets']) == 1:
+                context['awaiting_target'] = False
         if declared and context:
             context['text'] = declared
             context['turn'] = user_turn
-            if not intent and not confirmed:
+            if was_awaiting_message:
+                intent = True
+            elif not intent and not confirmed:
                 if len(context['targets']) != 1:
                     return followups.ambiguous_reply(context['targets'])
                 return (f'Ich habe „{declared[:240]}“ als Nachricht für den T3-Thread '
@@ -209,6 +213,15 @@ class VoiceConversation:
                     if len(mentions) > 1:
                         return followups.ambiguous_reply(mentions)
                     return 'Welchen T3-Thread meinst du, und welche Nachricht soll ich dorthin senden?'
+                matches = followups.matching_targets(parsed_followup['target'])
+                if len(matches) > 1:
+                    self.followup_context = {
+                        'target_ids': [t['id'] for t in matches], 'targets': matches,
+                        'text': parsed_followup['text'],
+                        'turn': sum(m.get('role') == 'user' for m in transcript),
+                        'awaiting_message': False, 'awaiting_target': True,
+                    }
+                    return followups.ambiguous_reply(matches)
                 self.discard_followup_context(sum(m.get('role') == 'user' for m in transcript))
                 expected = self.revision() if revision is None else revision
                 event_id = self.conversation_id + ':' + str(sum(
