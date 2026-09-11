@@ -147,6 +147,22 @@ class SettleQueueTests(ConversationFixture, unittest.TestCase):
             self.operation['attempt'] = None
         self.assertNotIn('t3-thread', self.store.data['settle_queue'])
 
+    def test_operation_marker_and_queue_are_persisted_together(self):
+        self.c.delegate(self.operation).coordinator_id = 'op-coordinator'
+        self.c.delegate(self.operation).checkpoint()
+        self.c.reserve_attempt()
+        original_save = self.store.save
+        observed = []
+        def inspect_save():
+            observed.append((
+                self.operation['attempt'].get('coordinator_settle_requested'),
+                'op-coordinator' in self.store.data.get('settle_queue', {}),
+            ))
+            original_save()
+        self.store.save = Mock(side_effect=inspect_save)
+        self.c.settle_operation_coordinator(self.operation, 'remote_end')
+        self.assertEqual(observed, [(True, True)])
+
     def test_restart_after_interrupted_call_settles_via_recovery(self):
         self.c.delegate(self.operation).coordinator_id = 'op-coordinator'
         self.c.delegate(self.operation).checkpoint()
