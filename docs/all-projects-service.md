@@ -1,6 +1,6 @@
 # Dauerhafter Sprachagent für alle T3-Projekte
 
-Seit dem 11. September 2026 ist der gemeinsame Dienst auf diesem Mac aktiviert. Er überwacht alle Projekte der verbundenen T3-Instanz, einschließlich PeakShare. Neu angelegte Projekte und Threads werden beim nächsten Durchlauf automatisch berücksichtigt. Archivierte Threads und interne Gesprächskoordinatoren werden nicht automatisch angerufen.
+Seit dem 11. September 2026 ist der gemeinsame Dienst auf diesem Mac aktiviert. Er überwacht alle Projekte der verbundenen T3-Instanz, einschließlich PeakShare. Neu angelegte Projekte und Threads werden beim nächsten Durchlauf automatisch berücksichtigt. Archivierte Threads und interne Gesprächskoordinatoren werden nicht automatisch angerufen. Nach dem vollständigen Ende eines Telefongesprächs werden dessen Gesprächskoordinatoren automatisch als settled markiert; siehe den Abschnitt Settled-Status in [telegram-service.md](telegram-service.md).
 
 ## Anrufe, Dialoge und Status
 

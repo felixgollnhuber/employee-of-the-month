@@ -12,7 +12,7 @@ from .config import read_private_json, private_directory
 from .control import GateError
 from .handoff import _pending, pending_requests
 from .keychain import cached_database_key
-from .t3 import T3Client, T3Delegation, now
+from .t3 import T3Client, T3Delegation, now, settle_after_call
 
 
 def question_due(snapshot, request_id, delay_seconds, current_time=None):
@@ -101,6 +101,7 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
                         attempts[key]["status"] = "attempt_failed_or_interrupted"
                         raise
                     finally:
+                        settle_after_call(client, getattr(delegation,'coordinator_id',None), conversation_id=key+':'+attempts[key]['attempted_at'], emit=emit)
                         for covered in getattr(delegation,'request_ids_in_call',()):
                             covered_key=thread['id']+':'+covered
                             if covered_key not in attempts:

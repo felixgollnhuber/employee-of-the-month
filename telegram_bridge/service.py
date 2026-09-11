@@ -30,6 +30,7 @@ class VoiceConversation:
         self.proposal_id = None
         self.conversation_id = uuid.uuid4().hex
         self.history = history
+        self.operations_in_call = {operation_id} if operation_id else set()
 
     def remember(self, transcript=None):
         if self.history:
@@ -165,6 +166,7 @@ class VoiceConversation:
             selected = result.get('operation_id')
             if isinstance(selected, str) and selected in {o['id'] for o in available}:
                 self.operation_id = selected
+                self.operations_in_call.add(selected)
                 operation = c.data['operations'][selected]
                 c.begin_incoming(operation, self.call_key or self.call_id)
                 if self.call_id is not None:
@@ -284,6 +286,20 @@ class TelegramService:
             self.session.start(self.conversations.data['target_id'], authorized=True, consent=True)
         self.emit({'conversation_call_started': True, 'operation_id': operation_id, 'incoming': incoming is not None})
 
+    def settle_after_call(self, voice, status):
+        """Worker-side: the call is fully over, so its coordination threads may settle.
+
+        The status coordinator belongs to this call only. Operation coordinators settle via
+        their attempt; a later text or callback turn wakes them again on the T3 side."""
+        reason = status.get('reason') or status['phase']
+        if voice.coordinator_id:
+            self.conversations.request_settle(voice.coordinator_id, conversation_id=voice.conversation_id, reason=reason)
+            self.history.update(voice.conversation_id, coordinator_settle='requested')
+        for identifier in sorted(voice.operations_in_call):
+            operation = self.conversations.data['operations'].get(identifier)
+            if operation and operation.get('attempt'):
+                self.conversations.settle_operation_coordinator(operation, reason)
+
     def begin_outgoing(self, identifier, generation):
         if identifier is None or generation != self.input_generation or self.pending_incoming: return
         def validate():
@@ -299,7 +315,11 @@ class TelegramService:
         if self.launcher: self.launcher.recover()
         if not self.recovered:
             self.conversations.recover()
+            for conversation_id, coordinator_id in self.history.settle_candidates():
+                self.conversations.request_settle(coordinator_id, conversation_id=conversation_id, reason='service_restart')
+                self.history.update(conversation_id, coordinator_settle='requested')
             self.recovered = True
+        self.conversations.settle_coordinators()
         if (self.max_calls is None or self.calls < self.max_calls) and self.pending_incoming is None:
             return self.conversations.reserve_attempt(self.delay, self.min_call_interval)
         return None
@@ -325,11 +345,12 @@ class TelegramService:
             self.session.tick()
             if self.clock() >= self.call_deadline: self.session.end('maximum_duration')
             if self.session.phase in ('ended', 'failed', 'end_unconfirmed'):
-                status, identifier = self.session.status(), self.voice.operation_id
+                status, identifier, voice = self.session.status(), self.voice.operation_id, self.voice
                 self.emit({'conversation_call_ended': True, 'operation_id': identifier, **status})
                 self.session._stop_media()
-                self.history.finish(self.voice.conversation_id, status)
+                self.history.finish(voice.conversation_id, status)
                 self.session = self.media = self.voice = None
+                self.submit(lambda: self.settle_after_call(voice, status))
                 if status['phase'] == 'end_unconfirmed' or status.get('media_cleanup_confirmed') is False:
                     raise GateError('service_call_cleanup_unconfirmed')
                 if identifier and self.conversations.data['operations'][identifier]['attempt']:
@@ -356,6 +377,9 @@ class TelegramService:
                 self.session.tick()
             self.history.finish(self.voice.conversation_id, self.session.status())
         self.executor.shutdown(wait=True, cancel_futures=True)
+        if self.session:
+            # The worker is gone; queue the settle durably so the next service start performs it.
+            self.settle_after_call(self.voice, self.session.status())
         self.history.close()
         if drain_messages:
             tags = []
