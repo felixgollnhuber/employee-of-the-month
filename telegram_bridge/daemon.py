@@ -61,7 +61,10 @@ def prepare_install(root, service_root, profile, python, library, native_runtime
             '--library', str(release/'libtdjson.dylib'), '--media-runtime', str(release/'media_runtime')]
     plist = {'Label': LABEL, 'ProgramArguments': args, 'WorkingDirectory': str(release),
              'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 30, 'ExitTimeOut': 120,
-             'ProcessType': 'Background', 'StandardOutPath': str(log), 'StandardErrorPath': str(log),
+             # The in-memory ADM needs 10 ms callbacks. Background timer
+             # coalescing reduced this to ~100 ms in a launchd reproduction.
+             'ProcessType': 'Interactive', 'LegacyTimers': True,
+             'StandardOutPath': str(log), 'StandardErrorPath': str(log),
              'EnvironmentVariables': {'PATH': '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin',
                                       'PYTHONUNBUFFERED': '1'}}
     staged = service_root/'launch-agent.plist'

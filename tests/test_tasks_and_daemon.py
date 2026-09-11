@@ -235,6 +235,8 @@ class LifecycleTests(ConversationFixture, unittest.TestCase):
         self.assertIn('--daemon',config['ProgramArguments'])
         self.assertIn('--allow-task-creation',config['ProgramArguments'])
         self.assertTrue(config['KeepAlive'])
+        self.assertEqual(config['ProcessType'], 'Interactive')
+        self.assertTrue(config['LegacyTimers'])
         self.assertFalse((release/'secret.key').exists())
         (root/'telegram_bridge/__init__.py').write_text('changed')
         self.assertEqual((release/'telegram_bridge/__init__.py').read_text(),'')

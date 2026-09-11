@@ -131,3 +131,18 @@ Am 11. September 2026 meldete der Nutzer einen angenommenen Anruf ohne hörbare 
 Die Implementierung startete die Sprachsitzung bereits nach der nativen Initialisierung, bevor ein bestätigtes `connected` vorlag. Der korrigierte Pfad wartet auf diese Medienbestätigung und startet die API asynchron, damit Signalisierungsereignisse weiter verarbeitet werden. Die PCM-Übergabe ist auf Echtzeit mit maximal 100 ms Vorlauf begrenzt. Eine getrennte Ausgabewarteschlange verhindert, dass langsame Wiedergabe den API-Empfang blockiert. Native Pufferfehler und ein jemals erreichter Verbindungszustand werden jetzt ausdrücklich protokolliert.
 
 145 Offline-Tests bestehen, einschließlich Verbindungsreihenfolge, frühem Auflegen, Audiobursts und nicht blockierter Transkriptverarbeitung. Der korrigierte feste Release wurde aktiviert und meldete alle 19 Projekte ohne Backend-Fehler. Die hörbare Wirkung dieses Fixes muss im erneuten Nutzeranruf bestätigt werden; der vorherige Fehlercode allein beweist noch keine vollständige Ursachenklärung.
+
+## Reproduzierte Timer-Drosselung des LaunchAgents
+
+Der erneute Nutzeranruf blieb nach der Korrektur der Startreihenfolge stumm. Die erweiterten Logs belegten diesmal eine zwischenzeitlich hergestellte Medienverbindung, gefolgt von `reconnecting`. Der erste Fix allein hatte den Nutzerfehler damit nicht behoben.
+
+Als Unterschied zu den erfolgreichen manuell gestarteten Gesprächen wurde die LaunchAgent-Klassifikation untersucht. Ein eigenständiger C++-Test verwendete dieselbe 10-ms-Schleife mit `condition_variable::wait_until` und derselben Nachlaufkorrektur wie die native PCM-Verarbeitung. Zwei temporäre LaunchAgents führten ausschließlich diesen Timer-Test aus, ohne Audio, Netzwerk, API oder Telefonie:
+
+| LaunchAgent-Konfiguration | Durchläufe | Gemessene Dauer |
+| --- | --- | --- |
+| `ProcessType=Background` | 30 | 3,07882 Sekunden |
+| `ProcessType=Interactive`, `LegacyTimers=true` | 300 | 3,00235 Sekunden |
+
+Die vorherige Konfiguration drosselte diese für 100 Hz vorgesehene Schleife damit auf ungefähr 10 Hz. Die lokale macOS-Handbuchseite `launchd.plist(5)` beschreibt die Ressourcenbegrenzung für Hintergrundprozesse und die Timer-Zusammenfassung; `LegacyTimers` ermöglicht zusammen mit `Interactive` die erforderliche präzise Taktung. Beide temporären Test-Jobs wurden anschließend entfernt.
+
+Der produktive LaunchAgent wurde auf `Interactive` mit präzisen Timern umgestellt. Die Installation prüft diese Eigenschaften jetzt im Regressionstest. 145 Offline-Tests bestehen. Der neue feste Release wurde aktiviert; seine Zustandsmeldung zeigt alle 19 Projekte und keinen Backend-Fehler. Der Nutzer wurde zu einem erneuten Hörtest aufgefordert. Die Timer-Drosselung ist reproduziert und in der neuen Konfiguration beseitigt; die subjektive Hörbestätigung des korrigierten Dienstes steht noch aus.
