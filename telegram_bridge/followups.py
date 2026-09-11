@@ -41,13 +41,16 @@ def contextual_send(text):
     there = r'(?:dort|dahin|dorthin|da\s+hin)'
     match = re.fullmatch(
         rf'(?is)\s*(?:ja[,\s]+)?(?:bitte\s+)?{verb}\s+(?:bitte\s+)?'
-        rf'(?:(?:die|eine)\s+(?:Nachricht|Folgenachricht)\s+)?{there}\s+(?:bitte\s+)?(?P<message>.+?)\s*[.!]?\s*', text)
+        rf'(?:(?:die|eine)\s+(?:Nachricht|Folgenachricht)\s+)?{there}\s+(?P<message>.+?)\s*', text)
     if not match:
         match = re.fullmatch(
             rf'(?is)\s*(?:ja[,\s]+)?(?:bitte\s+)?{verb}\s+(?:bitte\s+)?'
-            rf'(?P<message>.+?)\s+{there}(?:\s+hin)?\s*[.!]?\s*', text)
+            rf'(?P<message>.+?)\s+{there}(?:\s+hin)?[.!?]?\s*', text)
     if match:
-        message = re.sub(r'(?is)\s+hin\s*$', '', match['message']).strip()
+        message = match['message'].strip()
+        structural = re.fullmatch(r'(?is)(?P<message>.+?)\s+hin[.!?]?', message)
+        if structural:
+            message = structural['message'].strip()
         return True, message
     intent = bool(re.search(rf'(?is)\b{verb}\b', text) and re.search(rf'(?is)\b{there}\b', text))
     return intent, None
@@ -56,8 +59,8 @@ def contextual_send(text):
 def contextual_message(text):
     match = re.search(
         r'(?is)\b(?:die\s+)?(?:Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt)\s+'
-        r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\s*[:,-]?\s*(?P<message>.+?)\s*[.!]?\s*$', text)
-    return match['message'].strip().rstrip('.!') if match else None
+        r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\s*[:,-]?\s*(?P<message>.+?)\s*$', text)
+    return match['message'].strip() if match else None
 
 
 def contextual_confirmation(text):
@@ -102,7 +105,9 @@ class Followups:
             identifier = str(thread.get('id', ''))
             title = str(thread.get('title', ''))
             id_match = bool(identifier and re.search(r'(?<!\w)' + re.escape(identifier.casefold()) + r'(?!\w)', folded))
-            if id_match or (title and title.casefold() in folded):
+            title_match = bool(title and re.search(
+                r'(?<!\w)' + re.escape(title.casefold()) + r'(?!\w)', folded))
+            if id_match or title_match:
                 result.append({**thread, 'project_title': projects[thread['projectId']].get('title', thread['projectId'])})
         return result
 

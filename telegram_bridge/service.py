@@ -63,11 +63,21 @@ class VoiceConversation:
             return None
 
         user_messages = [m.get('text', '') for m in transcript if m.get('role') == 'user']
-        mentions = followups.mentioned_targets(current)
+        address_text = current
+        if intent:
+            verb = re.search(r'(?i)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', current)
+            address_text = current[:verb.start()] if context is None and verb else ''
+        mentions = followups.mentioned_targets(address_text) if address_text.strip() else []
         mention_turn = user_turn
         if context is None and not mentions:
             for offset, previous in enumerate(reversed(user_messages[:-1][-4:]), start=1):
-                mentions = followups.mentioned_targets(previous)
+                previous_intent, _ = contextual_send(previous)
+                previous_address = previous
+                if previous_intent:
+                    previous_verb = re.search(
+                        r'(?i)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', previous)
+                    previous_address = previous[:previous_verb.start()] if previous_verb else ''
+                mentions = followups.mentioned_targets(previous_address) if previous_address.strip() else []
                 if mentions:
                     mention_turn = user_turn - offset
                     break
@@ -88,7 +98,7 @@ class VoiceConversation:
         if context and context.get('awaiting_message') and not intent and not confirmed and not declared:
             if not current.rstrip().endswith('?') and not re.match(
                     r'(?i)\s*(?:wer|wie|was|warum|weshalb|welch|wo|wann)\b', current):
-                message = current.strip().rstrip('.!')
+                message = current.strip()
                 intent = bool(message)
         if context and message:
             context['text'] = message
@@ -105,6 +115,8 @@ class VoiceConversation:
                         f'„{context["targets"][0].get("title")}“ verstanden. Sag einfach „mach das“, wenn ich sie senden soll.')
 
         if not intent and not (confirmed and context):
+            if context and not selected_now:
+                self.followup_context = None
             return None
         if context is None:
             self.followup_context = {
@@ -155,11 +167,24 @@ class VoiceConversation:
                     and current.strip().casefold().rstrip('.!') not in ('nein', 'abbrechen', 'doch nicht')):
                 self.proposal_id = None
             followups = Followups(c)
-            if parse_followup(current) is not None:
+            parsed_followup = parse_followup(current)
+            if parsed_followup is not None:
                 self.operation_id = None
-                self.followup_context = None
                 if hasattr(self, 'prior_transcript'):
                     del self.prior_transcript
+                if not parsed_followup:
+                    mentions = followups.mentioned_targets(current)
+                    self.followup_context = {
+                        'target_ids': [t['id'] for t in mentions], 'targets': mentions,
+                        'text': None, 'turn': sum(m.get('role') == 'user' for m in transcript),
+                        'awaiting_message': len(mentions) == 1, 'awaiting_target': len(mentions) != 1,
+                    }
+                    if len(mentions) == 1:
+                        return f'Welche Nachricht soll ich an den T3-Thread „{mentions[0].get("title")}“ senden?'
+                    if len(mentions) > 1:
+                        return followups.ambiguous_reply(mentions)
+                    return 'Welchen T3-Thread meinst du, und welche Nachricht soll ich dorthin senden?'
+                self.followup_context = None
                 expected = self.revision() if revision is None else revision
                 event_id = self.conversation_id + ':' + str(sum(
                     m.get('role') == 'user' for m in transcript))

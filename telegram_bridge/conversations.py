@@ -73,7 +73,7 @@ class Conversations:
     SETTLE_RETRY_SECONDS = 30
     SETTLE_GIVE_UP_SECONDS = 1800
 
-    def request_settle(self, coordinator_id, *, conversation_id, reason):
+    def request_settle(self, coordinator_id, *, conversation_id, reason, save=True):
         """Durably note that the phone conversation behind a coordination thread has fully ended.
 
         Idempotent per coordinator: a later call on the same coordinator refreshes the entry.
@@ -84,7 +84,8 @@ class Conversations:
         queue[coordinator_id] = {'conversation_id': conversation_id, 'reason': reason,
                                  'requested_at': time.time(), 'attempts': 0, 'next_attempt_at': 0,
                                  'history': previous.get('history', [])[-4:]}
-        self.store.save()
+        if save:
+            self.store.save()
 
     def settle_coordinators(self, current_time=None):
         """Settle queued coordination threads in T3. Runs only between calls on the worker."""
@@ -113,10 +114,10 @@ class Conversations:
         attempt = operation.get('attempt')
         if not attempt or attempt.get('coordinator_settle_requested'): return
         coordinator_id = self.delegate(operation).coordinator_id
+        if coordinator_id:
+            self.request_settle(coordinator_id, conversation_id=attempt['id'], reason=reason, save=False)
         attempt['coordinator_settle_requested'] = True
         self.store.save()
-        if coordinator_id:
-            self.request_settle(coordinator_id, conversation_id=attempt['id'], reason=reason)
 
     def project_title(self, operation):
         return operation.get('project_title') or operation['dialog']['project_id']
