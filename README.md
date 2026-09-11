@@ -111,6 +111,8 @@ GPT-Live 1 benötigt einen eigenen OpenAI-API-Key und wird separat vom ChatGPT-A
 
 ## Weitere Dokumentation
 
+- [Aktiver dauerhafter Sprachagent: alle Projekte, neue Feature-Threads und Modellwahl](docs/all-projects-service.md).
+
 - [Telegram-Folgedialoge, Rückrufe und Statusanrufe mit serve-t3](docs/telegram-service.md).
 - [T3-Integration und Abo-/API-Entscheidung](docs/t3-voice-integration.md).
 - [Nachweise und Aussagegrenzen](docs/evidence.md).

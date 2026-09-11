@@ -31,3 +31,7 @@ Private Konfiguration liegt unter `~/Library/Application Support/CodexPhoneBridg
 ## Dialogsemantik
 
 Eine T3-Empfangsbestätigung bedeutet nur, dass eine Nutzereingabe angekommen ist. Eine Rückfrage wie „Welcher Bericht ist gemeint?“ darf keine abgeschlossene Formatentscheidung vortäuschen. Die Erklärung aus dem Arbeits-Thread muss zurück ins Gespräch gelangen. Bei Auflegen oder Nichtabheben verbleibende Fragen bleiben offen und bilden den Ausgangspunkt für den Folgedialog in Issue #1.
+
+## Aktueller gemeinsamer Betrieb
+
+Auf ausdrücklichen Nutzerauftrag läuft nun ein gemeinsamer LaunchAgent für alle T3-Projekte einschließlich PeakShare. Er ersetzt die einzelnen Wächter. Neue Feature-Aufträge können nach Bestätigung als T3-Threads mit vorgeschlagenem Account, Modell und Reasoning gestartet werden. `service-health.json` und `service-pilot.json` im privaten Profil sind die aktuellen Laufzeitquellen. Die bisherigen Pilotdateien sind als durch den gemeinsamen Dienst abgedeckt gekennzeichnet. Siehe [all-projects-service.md](all-projects-service.md).

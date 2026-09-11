@@ -110,13 +110,17 @@ def main():
                        help="Wait after a question is created before calling (default: 180)")
     watch.add_argument("--passphrase-dialog", action="store_true")
     watch.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
-    service = sub.add_parser("serve-t3", help="Telegram-Folgedialoge und eingehende Anrufe für genau ein T3-Projekt")
+    service = sub.add_parser("serve-t3", help="Telegram-Sprachagent für ein oder alle T3-Projekte")
     service.add_argument("--profile", default="default")
-    service.add_argument("--project-id", required=True)
+    scope = service.add_mutually_exclusive_group(required=True)
+    scope.add_argument("--project-id")
+    scope.add_argument("--all-projects", action="store_true")
+    service.add_argument("--daemon", action="store_true", help="Dauerhaft bis zum Stoppsignal laufen")
+    service.add_argument("--allow-task-creation", action="store_true", help="Bestätigte Sprachaufträge als neue T3-Threads starten")
     service.add_argument("--allow-messages-and-calls", action="store_true")
     service.add_argument("--service-seconds", type=int, default=3600)
     service.add_argument("--seconds", type=int, default=120)
-    service.add_argument("--max-calls", type=int, default=1)
+    service.add_argument("--max-calls", type=int)
     service.add_argument("--question-delay-seconds", type=int, default=180)
     service.add_argument("--passphrase-dialog", action="store_true")
     service.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
@@ -220,10 +224,15 @@ def main():
         from .service import run_service
         from .ringing import macos_passphrase
         import signal
-        def stop_service(_signum, _frame): raise KeyboardInterrupt()
+        import threading
+        stopping = threading.Event()
+        def stop_service(_signum, _frame): stopping.set()
         signal.signal(signal.SIGTERM, stop_service)
-        run_service(profile_path(args.profile), args.library, args.project_id, authorized=True,
-                    seconds=args.service_seconds, call_seconds=args.seconds, max_calls=args.max_calls,
+        signal.signal(signal.SIGINT, stop_service)
+        max_calls = args.max_calls if args.max_calls is not None else None if args.daemon else 1
+        run_service(profile_path(args.profile), args.library, '*' if args.all_projects else args.project_id, authorized=True,
+                    seconds=args.service_seconds, call_seconds=args.seconds, max_calls=max_calls,
+                    continuous=args.daemon, allow_tasks=args.allow_task_creation, stop_requested=stopping.is_set,
                     question_delay=args.question_delay_seconds,
                     native_executable=args.media_runtime,
                     secret_input=macos_passphrase if args.passphrase_dialog else getpass.getpass, emit=emit)

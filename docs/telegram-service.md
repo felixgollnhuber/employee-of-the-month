@@ -1,5 +1,7 @@
 # Telegram-Folgedialog und eingehende Anrufe
 
+Aktueller Dauerbetrieb: [alle T3-Projekte, neue Feature-Aufträge und Modellwahl](all-projects-service.md). Der unten beschriebene Einzelprojektmodus bleibt für ausdrücklich eingegrenzte Starts verfügbar.
+
 Der explizit gestartete `serve-t3`-Dienst bearbeitet genau ein T3-Projekt und das konfigurierte persönliche Telegram-Konto. Er vereint ausgehende Anrufe, Telegram-Textdialoge und eingehende Audioanrufe in einem TDLib-Client. GPT-Live 1, Cedar und die vorhandene T3-Delegation bleiben der Sprachpfad.
 
 ## Verhalten
@@ -50,4 +52,4 @@ Im gemeinsamen Live-Test wurden die erste Folgenachricht nach offenem Kontaktver
 
 Noch offen sind gezielte Live-Fälle für Ablehnen, Abbruch vor der Entscheidung, Netzunterbrechung, Antwort während des Aufbaus, Textkorrektur, mehrere offene Vorgänge und ein fremdes Konto.
 
-Beim geordneten Ende des Live-Tests blieb eine Statusantwort als `reserved` stehen. Das kontrollierte Leeren und Bestätigen noch ausstehender Versandaufträge vor dem Beenden bleibt ein offener Punkt. Kein automatischer Neuversand eines unklaren Auftrags.
+Beim geordneten Ende des ersten Live-Tests blieb eine Statusantwort als `reserved` stehen. Die spätere Daemon-Erweiterung leert und bestätigt neu ausstehende Versandaufträge vor dem Beenden. Der alte unklare Auftrag wurde nicht erneut gesendet.

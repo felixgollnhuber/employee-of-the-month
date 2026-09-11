@@ -101,6 +101,29 @@ class T3Client:
         if type(result.get("sequence")) is not int: raise GateError("t3_dispatch_unconfirmed")
         return result
 
+    def rpc(self, method, payload=None):
+        """Read T3's authenticated provider catalog using its Effect RPC envelope."""
+        if method not in ('server.getConfig', 'server.refreshProviders'):
+            raise GateError('unsupported_t3_metadata_method')
+        from websockets.sync.client import connect
+        tag = uuid.uuid4().hex
+        try:
+            with connect(self.origin.replace('http', 'ws', 1) + '/ws',
+                         additional_headers={'Authorization': 'Bearer ' + self.token},
+                         open_timeout=8, close_timeout=2, max_size=8*1024*1024) as ws:
+                ws.send(json.dumps({'_tag': 'Request', 'id': tag, 'tag': method,
+                                    'payload': payload or {}, 'headers': []}))
+                deadline = time.monotonic() + 15
+                while time.monotonic() < deadline:
+                    event = json.loads(ws.recv(timeout=max(.1, deadline-time.monotonic())))
+                    if event.get('requestId') != tag: continue
+                    result = event.get('exit', {})
+                    if result.get('_tag') != 'Success': raise GateError('t3_metadata_request_failed')
+                    return result['value']
+        except Exception:
+            raise GateError('t3_metadata_unavailable') from None
+        raise GateError('t3_metadata_timeout')
+
     def create_coordinator(self, source, *, title="Telefonbrücke - Gesprächskoordination", interaction_mode="default"):
         identifier = str(uuid.uuid4())
         self.dispatch({"type":"thread.create", "commandId":str(uuid.uuid4()), "threadId":identifier,

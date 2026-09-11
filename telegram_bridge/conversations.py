@@ -17,13 +17,17 @@ from .watch import question_due
 
 
 class ConversationStore:
-    def __init__(self, profile, project_id, target_id):
+    def __init__(self, profile, project_id, target_id, *, expand_scope=False):
         self.profile = Path(profile)
         private_directory(self.profile)
         path = self.profile / 'conversations.json'
         self.data = read_private_json(self.profile, path.name, max_bytes=8*1024*1024) if path.exists() or path.is_symlink() else {
             'version': 1, 'project_id': project_id, 'target_id': target_id, 'activated_at': int(time.time()),
             'operations': {}, 'updates': {}, 'outbox': {}, 'calls': {}}
+        if (expand_scope and project_id == '*' and self.data.get('target_id') == target_id
+                and self.data.get('version') == 1 and self.data.get('project_id') != '*'):
+            self.data['previous_project_id'] = self.data['project_id']
+            self.data['project_id'] = '*'
         if (self.data.get('version') != 1 or self.data.get('project_id') != project_id
                 or self.data.get('target_id') != target_id):
             raise GateError('conversation_store_scope_mismatch')
@@ -56,6 +60,34 @@ class Conversations:
         self.legacy_attempts = read_private_json(store.profile, legacy.name, max_bytes=262144) if legacy.exists() or legacy.is_symlink() else {}
         if not isinstance(self.legacy_attempts, dict): raise GateError('invalid_watcher_state')
 
+    def in_scope(self, project_id):
+        return bool(project_id) and (self.data['project_id'] == '*' or project_id == self.data['project_id'])
+
+    def projects(self, shell=None):
+        shell = shell or self.client.request('/api/orchestration/shell')
+        return [p for p in shell.get('projects', []) if self.in_scope(p.get('id')) and not p.get('deletedAt')]
+
+    def is_internal(self, thread):
+        return thread.get('title', '').startswith('Telefonbrücke - Gesprächskoordination')
+
+    def project_title(self, operation):
+        return operation.get('project_title') or operation['dialog']['project_id']
+
+    def coordinator_source(self, shell):
+        projects = {p['id']: p for p in self.projects(shell)}
+        preferred = self.data.get('previous_project_id', self.data['project_id'])
+        candidates = [t for t in shell.get('threads', []) if t.get('projectId') in projects
+                      and not t.get('archivedAt') and not t.get('deletedAt') and not self.is_internal(t)]
+        candidates.sort(key=lambda t: (t['projectId'] == preferred, t.get('updatedAt', '')), reverse=True)
+        for thread in candidates:
+            project = projects[thread['projectId']]
+            root = project.get('workspaceRoot')
+            if root:
+                repository_root = (project.get('repositoryIdentity') or {}).get('rootPath', root)
+                if not Path(root).is_dir() or not (Path(repository_root)/'.git').exists(): continue
+            return thread
+        return None
+
     def delegate(self, operation):
         identifier = operation['id']
         if identifier not in self.delegates:
@@ -70,8 +102,9 @@ class Conversations:
 
     def discover(self, delay=180):
         shell = self.client.request('/api/orchestration/shell')
+        projects = {p['id']: p for p in self.projects(shell)}
         for thread in shell.get('threads', []):
-            if (thread.get('projectId') != self.data['project_id'] or thread.get('archivedAt')
+            if (thread.get('projectId') not in projects or thread.get('archivedAt') or self.is_internal(thread)
                     or thread.get('deletedAt') or not thread.get('hasPendingUserInput')):
                 continue
             snapshot = self.client.snapshot(thread['id'])
@@ -92,6 +125,7 @@ class Conversations:
                 identifier = uuid.uuid4().hex[:12]
                 self.data['operations'][identifier] = {
                     'id': identifier, 'thread_id': thread['id'], 'request_id': request_id,
+                    'project_id': thread['projectId'], 'project_title': projects[thread['projectId']].get('title', thread['projectId']),
                     'title': dialog.packet['thread_title'], 'dialog': dialog.state(),
                     'transcript': [], 'status': 'open', 'attempt': None, 'first_message': None,
                     'created_at': max(asked_at, self.data['activated_at'])}
@@ -130,12 +164,14 @@ class Conversations:
                 else: raise
         return result
 
-    def reserve_attempt(self, delay=0):
+    def reserve_attempt(self, delay=0, min_interval=0):
+        if time.time() - self.data.get('last_outgoing_at', 0) < min_interval: return None
         for operation in self.open_operations():
             if operation['status'] == 'open' and operation['attempt'] is None:
                 if not question_due(self.client.snapshot(operation['thread_id']), operation['request_id'], delay):
                     continue
                 operation['attempt'] = {'id': uuid.uuid4().hex, 'phase': 'starting'}
+                self.data['last_outgoing_at'] = time.time()
                 self.store.save()  # Before createCall. Never redial after a crash.
                 return operation['id']
         return None
@@ -193,7 +229,7 @@ class Conversations:
         if (not self.refresh(operation) or operation['status'] != 'open'
                 or operation['first_message'] is not None or operation['attempt'].get('followup_suppressed')): return
         questions = ' '.join(q['question'] for q in self.delegate(operation).packet['questions'])
-        self.queue_text(f"Ich brauche noch kurz deine Einschätzung zu {operation['title']}: {questions[:2500]}\n"
+        self.queue_text(f"Ich brauche noch kurz deine Einschätzung zu {operation['title']} ({self.project_title(operation)}): {questions[:2500]}\n"
                         f"Antworte einfach hier oder ruf zurück. Vorgang {identifier}.", operation=operation, purpose='first')
 
     def delivery(self, event):
@@ -224,20 +260,26 @@ class Conversations:
         available = self.open_operations()
         return available[0] if len(available) == 1 else None
 
-    def status_text(self):
+    def status_text(self, project_id=None, query=''):
         shell = self.client.request('/api/orchestration/shell')
-        lines = []
-        for thread in shell.get('threads', []):
-            if thread.get('projectId') != self.data['project_id'] or thread.get('archivedAt') or thread.get('deletedAt'): continue
+        projects = {p['id']: p for p in self.projects(shell)}
+        threads = [t for t in shell.get('threads', []) if t.get('projectId') in projects
+                   and (project_id is None or t['projectId'] == project_id)
+                   and not t.get('archivedAt') and not t.get('deletedAt') and not self.is_internal(t)]
+        words = {w for w in re.findall(r'\w+', query.casefold()) if len(w) >= 4 and w not in {
+            'status','steht','läuft','meine','meinen','meinem','bitte','fortschritt','projekt','thread','aufgabe'}}
+        threads.sort(key=lambda t: (sum(w in t.get('title','').casefold() for w in words),
+                                   bool(t.get('hasPendingUserInput')), t.get('updatedAt', '')), reverse=True)
+        lines = [f'Ausschnitt: {min(12, len(threads))} von {len(threads)} aktiven Threads, neueste und offene zuerst.']
+        for thread in threads[:12]:
             source = self.client.snapshot(thread['id'])['thread']
             state = (source.get('latestTurn') or {}).get('state', 'unbekannt')
-            lines.append(f"{source.get('title', 'Aufgabe')}: {state}. {selected_context(source)}")
-        return '\n'.join(lines)[:10000] or 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
+            lines.append(f"{projects[thread['projectId']].get('title')}: {source.get('title', 'Aufgabe')}: {state}. {selected_context(source)[:1000]}")
+        return '\n'.join(lines)[:20000] or 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
 
     def status_reply(self, text):
         shell = self.client.request('/api/orchestration/shell')
-        thread = next((t for t in shell.get('threads', []) if t.get('projectId') == self.data['project_id']
-                       and not t.get('archivedAt') and not t.get('deletedAt')), None)
+        thread = self.coordinator_source(shell)
         if thread is None: return 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
         coordinator = self.data.get('status_coordinator')
         if coordinator is None:
@@ -248,7 +290,7 @@ class Conversations:
             'Du bist Mitarbeiter des Monats. Keine Tools, Dateizugriffe oder Projektaktionen. '
             'Beantworte die Statusfrage natürlich und knapp auf Deutsch, ausschließlich anhand dieser Daten. '
             'Nenne offene Fragen und Probleme nur, wenn sie belegt sind.\n' + json.dumps(
-                {'question': text, 'status': self.status_text()}, ensure_ascii=False))[:3500]
+                {'question': text, 'status': self.status_text(query=text)}, ensure_ascii=False))[:3500]
 
     def respond(self, operation, text):
         previous_request = operation['request_id']
