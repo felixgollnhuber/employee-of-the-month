@@ -16,7 +16,8 @@ def last_user(transcript):
 def explicit_confirmation(text):
     normalized = re.sub(r'[.,!?]', ' ', text.casefold())
     normalized = ' '.join(normalized.split())
-    return bool(re.fullmatch(r'(ja|genau|richtig|passt|starte|leg los|mach das)( (bitte|genau|richtig|passt|starte|leg los|mach das|so|das))*', normalized))
+    action = r'(?:starte|leg los|mach(?: das| es)?(?: bitte)?)'
+    return bool(re.fullmatch(r'(?:ja|genau|richtig|passt|' + action + r')(?: (?:bitte|genau|richtig|passt|' + action + r'|so|das))*', normalized))
 
 
 class TaskLauncher:
@@ -119,7 +120,7 @@ class TaskLauncher:
             time.sleep(.1)
 
     def reconcile(self, job):
-        if job['state'] in ('proposed', 'cancelled', 'started', 'failed'): return
+        if job['state'] in ('proposed', 'cancelled', 'superseded', 'started', 'failed'): return
         try: source = self.c.client.snapshot(job['thread_id'])['thread']
         except GateError: return
         if source.get('projectId') != job['project_id']: raise GateError('created_task_project_mismatch')

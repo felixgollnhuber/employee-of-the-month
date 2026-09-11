@@ -39,7 +39,7 @@ class VoiceConversation:
 
     def recent_context(self):
         orders = list((self.launcher.jobs if self.launcher else self.conversations.data.get('tasks', {})).values())
-        orders = [o for o in orders if o['state'] != 'cancelled' and self.conversations.in_scope(o['project_id'])][-5:]
+        orders = [o for o in orders if o['state'] not in ('cancelled', 'superseded') and self.conversations.in_scope(o['project_id'])][-5:]
         return {'previous_calls': self.history.recent(exclude=self.conversation_id) if self.history else [],
                 'saved_orders': [{k:o.get(k) for k in ('id','project_id','project_title','title','state','modelSelection','created_at','thread_id')}
                                  | {'prompt':o.get('prompt','')[:1200]} for o in orders],
@@ -156,6 +156,10 @@ class VoiceConversation:
             if self.launcher and result.get('new_task') is not None:
                 proposal, answer = self.launcher.propose(result['new_task'], transcript,
                     conversation_id=self.conversation_id, revision=self.revision() if revision is None else revision)
+                previous = self.launcher.jobs.get(self.proposal_id)
+                if previous and previous['state'] == 'proposed':
+                    previous.update(state='superseded', superseded_by=proposal['id'])
+                    c.store.save()
                 self.proposal_id = proposal['id']
                 return answer
             selected = result.get('operation_id')

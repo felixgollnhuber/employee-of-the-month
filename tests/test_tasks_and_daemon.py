@@ -158,6 +158,19 @@ class TaskTests(ConversationFixture, unittest.TestCase):
         self.assertIsNone(self.commands[0]['worktreePath'])
         self.assertEqual(len(self.sent), 1)
 
+    def test_ja_mach_starts_the_confirmed_job_once(self):
+        job = self.propose()
+        transcript = [{'role':'user','text':' Ja, mach'}]
+        self.assertIn('gestartet', self.launcher.confirm(job['id'], transcript, revision=2))
+        self.launcher.confirm(job['id'], transcript, revision=2)
+        self.assertEqual(len(self.commands), 2)
+
+    def test_short_confirmations_do_not_accept_qualifications_or_negations(self):
+        for text in ('Ja, mach', 'Ja, mach bitte', 'Mach es', 'Ja, starte', 'Ja, bitte'):
+            self.assertTrue(explicit_confirmation(text), text)
+        for text in ('Ja, mach aber mit Claude', 'Ja, mach nicht', 'Mach das später', 'Nein, mach', 'Ja, aber nicht starten'):
+            self.assertFalse(explicit_confirmation(text), text)
+
     def test_no_confirmation_wrong_project_and_new_speech_prevent_start(self):
         job = self.propose()
         for text in ('Nein', 'Ja, aber in PeakShare', 'Kannst du das?', 'Nicht starten'):
