@@ -38,7 +38,7 @@ Die Laufzeit liegt als feste Kopie unter `~/Library/Application Support/CodexPho
 
 `service-health.json` im privaten Telegram-Profil enthält den aktuellen PID, den Zeitpunkt der letzten Zustandsmeldung, den Projektumfang, einen gegebenenfalls aktiven Anruf und Backend-Fehler. `service-pilot.json` beschreibt die Betriebsparameter. Die bisherigen Projekt- und PeakShare-Pilotdateien verweisen auf den gemeinsamen Dienst. Geheimnisse stehen weder im LaunchAgent noch im Repository. Das Conversation-Ledger behält seine Größenbegrenzung von 8 MiB.
 
-Ein einzelnes Gespräch ist weiterhin auf 180 Sekunden begrenzt. Der Dienst selbst hat im Daemon-Modus keine geplante Endzeit und keine Gesamtzahl von Anrufen als Laufzeitgrenze. Vorhandene unklare Versandversuche werden nicht erneut gesendet. Beim geordneten Beenden werden neu wartende Nachrichten noch versendet und ihre Bestätigungen begrenzt abgewartet.
+Ein einzelnes Gespräch ist auf ausdrücklichen Nutzerwunsch auf 1200 Sekunden (20 Minuten) begrenzt. Anrufdienst, Sprachsitzung und native Medienlaufzeit verwenden diese Obergrenze. Der Dienst selbst hat im Daemon-Modus keine geplante Endzeit und keine Gesamtzahl von Anrufen als Laufzeitgrenze. Vorhandene unklare Versandversuche werden nicht erneut gesendet. Beim geordneten Beenden werden neu wartende Nachrichten noch versendet und ihre Bestätigungen begrenzt abgewartet.
 
 ## Nachweise
 
@@ -51,3 +51,7 @@ Die vollständige Auftragsberatung wurde zusätzlich mit einem synthetischen Tra
 Nach einem Nutzerbericht über einen stummen Anruf wurde der Medienstart korrigiert: GPT-Live startet erst nach bestätigter Telegram-Medienverbindung. Echtzeitbegrenzung der PCM-Ausgabe und eine getrennte Empfangs-/Ausgabeverarbeitung sichern den Übergang ab. Der Fix ist aktiviert; der erneute Hörtest ist noch offen.
 
 Der LaunchAgent verwendet `ProcessType=Interactive` und `LegacyTimers=true`. Ein lokaler Vergleich zeigte, dass die vorherige Hintergrundklassifikation die 10-ms-Taktschleife auf ungefähr ein Zehntel der erforderlichen Frequenz drosselte. Die korrigierte Konfiguration liefert im Vergleichstest 300 statt 30 Durchläufe in drei Sekunden. Details und die noch ausstehende erneute Hörbestätigung stehen in `evidence.md`.
+
+## Rückruf und bestehender Thread
+
+Ein erneuter Anruf beginnt mit einem neuen Gesprächskoordinator. Bestehende T3-Arbeits-Threads bleiben unabhängig vom Telefonat erhalten. Offene Ask-Vorgänge können anhand ihrer gespeicherten Zuordnung im selben Arbeits-Thread beantwortet werden. Ein bisher nur vorgeschlagener neuer Feature-Auftrag wird dagegen beim Rückruf noch nicht automatisch wieder als aktiver Vorschlag übernommen; die Gesprächsinstanz setzt `proposal_id` neu. Eine allgemeine nahtlose Fortsetzung des letzten Sprachgesprächs ist damit nicht zugesichert.

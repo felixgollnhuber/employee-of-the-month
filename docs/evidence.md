@@ -146,3 +146,9 @@ Als Unterschied zu den erfolgreichen manuell gestarteten Gesprächen wurde die L
 Die vorherige Konfiguration drosselte diese für 100 Hz vorgesehene Schleife damit auf ungefähr 10 Hz. Die lokale macOS-Handbuchseite `launchd.plist(5)` beschreibt die Ressourcenbegrenzung für Hintergrundprozesse und die Timer-Zusammenfassung; `LegacyTimers` ermöglicht zusammen mit `Interactive` die erforderliche präzise Taktung. Beide temporären Test-Jobs wurden anschließend entfernt.
 
 Der produktive LaunchAgent wurde auf `Interactive` mit präzisen Timern umgestellt. Die Installation prüft diese Eigenschaften jetzt im Regressionstest. 145 Offline-Tests bestehen. Der neue feste Release wurde aktiviert; seine Zustandsmeldung zeigt alle 19 Projekte und keinen Backend-Fehler. Der Nutzer wurde zu einem erneuten Hörtest aufgefordert. Die Timer-Drosselung ist reproduziert und in der neuen Konfiguration beseitigt; die subjektive Hörbestätigung des korrigierten Dienstes steht noch aus.
+
+## Gesprächslimit auf 20 Minuten erhöht
+
+Der Nutzer berichtete nach der Timer-Korrektur über ein dreiminütiges Gespräch mit anschließendem Abbruch. Die eigene 180-Sekunden-Grenze war sowohl im Dienst als auch in Sprach- und nativer Medienlaufzeit aktiv. Auf ausdrücklichen Auftrag wurden diese Grenzen auf 1200 Sekunden erhöht. Die native Laufzeit wurde separat neu kompiliert und gelinkt; elf Descriptor-/IPC-Prüfungen, der PCM-Selbsttest und 145 Offline-Tests bestehen. Die aktive Zustandsmeldung enthält jetzt `call_limit_seconds=1200`. Ein vollständiger 20-minütiger Live-Durchlauf wurde nicht durchgeführt.
+
+Zum Rückruf wurde der aktuelle Vorgang geprüft: Der zuletzt besprochene helth-Auftrag war noch `proposed`; für die reservierte Arbeits-Thread-ID meldete T3 HTTP 404. Es wurde weder ein Auftrag bestätigt noch erneut gestartet. Bestehende Arbeits-Threads bleiben beim Auflegen erhalten, aber ein Rückruf übernimmt einen unbestätigten Feature-Vorschlag derzeit nicht automatisch.

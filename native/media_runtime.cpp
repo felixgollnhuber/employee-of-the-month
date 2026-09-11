@@ -220,7 +220,7 @@ int main(int argc, char **argv) {
                     throw std::runtime_error("exact_audio_devices_unavailable");
                 call = tgcalls::Meta::Create("12.0.0", std::move(*prepared)); prepared.reset();
                 if (!call) throw std::runtime_error("native_create_failed");
-                deadline = std::chrono::steady_clock::now() + std::chrono::seconds(180);
+                deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1200);
                 emit({{"id", id}, {"ok", true}, {"started", true}});
             } else if (op == "pcm") {
                 if (!call || !pcmMode) throw std::runtime_error("media_not_started");

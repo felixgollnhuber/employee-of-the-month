@@ -69,6 +69,8 @@ class LiveVoiceTests(unittest.TestCase):
         for data in ('!', base64.b64encode(b'x').decode()):
             with self.assertRaises(GateError): decode_audio({'delta':data})
         with self.assertRaises(GateError): self.make_voice(FakeSocket(), max_seconds=0)
+        self.assertEqual(self.make_voice(FakeSocket(), max_seconds=1200).max_seconds, 1200)
+        with self.assertRaises(GateError): self.make_voice(FakeSocket(), max_seconds=1201)
         voice = self.make_voice(FakeSocket())
         with self.assertRaises(GateError): voice.push_audio(b'x')
         config = session_start('Fixture')['session']

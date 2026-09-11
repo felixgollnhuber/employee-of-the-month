@@ -233,6 +233,8 @@ class LifecycleTests(ConversationFixture, unittest.TestCase):
         config = plistlib.loads(staged.read_bytes())
         self.assertIn('--all-projects',config['ProgramArguments'])
         self.assertIn('--daemon',config['ProgramArguments'])
+        seconds_index = config['ProgramArguments'].index('--seconds')
+        self.assertEqual(config['ProgramArguments'][seconds_index+1], '1200')
         self.assertIn('--allow-task-creation',config['ProgramArguments'])
         self.assertTrue(config['KeepAlive'])
         self.assertEqual(config['ProcessType'], 'Interactive')

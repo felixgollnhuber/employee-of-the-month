@@ -56,7 +56,7 @@ class LiveVoice:
                  voice=DEFAULT_VOICE):
         if not isinstance(api_key, str) or not api_key.startswith("sk-"):
             raise GateError("openai_api_key_required")
-        if type(max_seconds) is not int or not 1 <= max_seconds <= 180:
+        if type(max_seconds) is not int or not 1 <= max_seconds <= 1200:
             raise GateError("bounded_live_duration_required")
         self.api_key = api_key
         self.instructions, self.audio_out = instructions, audio_out

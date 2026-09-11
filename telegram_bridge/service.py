@@ -346,7 +346,7 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
                 continuous=False, allow_tasks=False, stop_requested=lambda: False):
     if authorized is not True: raise GateError('explicit_service_authorization_required')
     if (type(seconds) is not int or not 1 <= seconds <= 86400 or type(call_seconds) is not int
-            or not 1 <= call_seconds <= 180 or not ((continuous and max_calls is None) or (type(max_calls) is int and 0 <= max_calls <= 20))
+            or not 1 <= call_seconds <= 1200 or not ((continuous and max_calls is None) or (type(max_calls) is int and 0 <= max_calls <= 20))
             or type(question_delay) is not int or not 0 <= question_delay <= 3600):
         raise GateError('bounded_service_settings_required')
     client = T3Client.from_profile(profile)
@@ -398,6 +398,7 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
                     from .daemon import write_health
                     write_health(profile, {'running': True, 'pid': os.getpid(), 'all_projects': project_id == '*',
                         'project_count': service.project_count, 'task_creation': allow_tasks,
+                        'call_limit_seconds': call_seconds,
                         'active_call': service.session.status() if service.session else None,
                         'backend_error': service.backend_error})
                     next_health = time.monotonic() + 10

@@ -57,7 +57,7 @@ def prepare_install(root, service_root, profile, python, library, native_runtime
     if not log.exists(): log.touch(mode=0o600)
     args = [str(Path(python).absolute()), '-u', '-m', 'telegram_bridge', 'serve-t3',
             '--profile', profile.name, '--all-projects', '--daemon', '--allow-messages-and-calls',
-            '--allow-task-creation', '--seconds', '180', '--question-delay-seconds', '180',
+            '--allow-task-creation', '--seconds', '1200', '--question-delay-seconds', '180',
             '--library', str(release/'libtdjson.dylib'), '--media-runtime', str(release/'media_runtime')]
     plist = {'Label': LABEL, 'ProgramArguments': args, 'WorkingDirectory': str(release),
              'RunAtLoad': True, 'KeepAlive': True, 'ThrottleInterval': 30, 'ExitTimeOut': 120,

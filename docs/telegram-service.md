@@ -40,7 +40,7 @@ Nach einem regulären Build:
   --service-seconds 3600 --seconds 120 --max-calls 1
 ```
 
-`--max-calls 0` deaktiviert automatische ausgehende Anrufe. Nachrichten und eingehende Anrufe bleiben aktiv. Laufzeit maximal 24 Stunden, Anrufdauer maximal 180 Sekunden, höchstens 20 automatische Anrufe pro Dienststart. Bereits versuchte Vorgänge bleiben auch über diese Starts hinweg gesperrt.
+`--max-calls 0` deaktiviert automatische ausgehende Anrufe. Nachrichten und eingehende Anrufe bleiben aktiv. Laufzeit maximal 24 Stunden, Anrufdauer maximal 1200 Sekunden (20 Minuten), höchstens 20 automatische Anrufe pro Dienststart. Bereits versuchte Vorgänge bleiben auch über diese Starts hinweg gesperrt.
 
 Mit `--library PFAD` und `--media-runtime PFAD` können vorhandene TDLib-Abhängigkeiten und eine separat gebaute neue Medienlaufzeit verwendet werden. Auf diesem Mac liegt der isoliert geprüfte neue Medienbuild unter `.build/issue-1-native/media_runtime`; Python-Umgebung und TDLib können aus `../codex-phone-bridge-telegram/.build/` stammen. Der aktuelle Python-Quellstand muss dabei aus diesem Checkout geladen werden.
 
