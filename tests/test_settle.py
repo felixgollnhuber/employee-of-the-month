@@ -224,6 +224,7 @@ class SettleServiceTests(ConversationFixture, unittest.TestCase):
         self.s.scan()
         self.assertEqual(len(self.client.settled), 1)
         self.assertEqual(self.s.history.data['calls'][0]['state'], 'interrupted')
+        self.assertEqual(CallHistory(self.store.profile, background=False).settle_candidates(), [])
 
     def test_work_threads_are_never_settled(self):
         self.start()

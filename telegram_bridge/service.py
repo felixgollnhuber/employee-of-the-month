@@ -315,9 +315,11 @@ class TelegramService:
         if self.launcher: self.launcher.recover()
         if not self.recovered:
             self.conversations.recover()
-            for conversation_id, coordinator_id in self.history.settle_candidates():
+            candidates = self.history.settle_candidates()
+            for conversation_id, coordinator_id in candidates:
                 self.conversations.request_settle(coordinator_id, conversation_id=conversation_id, reason='service_restart')
                 self.history.update(conversation_id, coordinator_settle='requested')
+            if candidates: self.history.flush()  # The background writer only runs once a call has begun.
             self.recovered = True
         self.conversations.settle_coordinators()
         if (self.max_calls is None or self.calls < self.max_calls) and self.pending_incoming is None:
