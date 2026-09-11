@@ -15,10 +15,11 @@ from .control import CallSession, GateError
 from .conversations import ConversationStore, Conversations
 from .live import RequestPump, resolve_target, QueuedMedia
 from .t3 import T3Client
+from .call_history import CallHistory
 
 
 class VoiceConversation:
-    def __init__(self, conversations, lock, operation_id=None, launcher=None):
+    def __init__(self, conversations, lock, operation_id=None, launcher=None, history=None):
         self.conversations, self.lock, self.operation_id = conversations, lock, operation_id
         self.cancelled = lambda: False
         self.revision = lambda: 0
@@ -28,19 +29,39 @@ class VoiceConversation:
         self.launcher = launcher
         self.proposal_id = None
         self.conversation_id = uuid.uuid4().hex
+        self.history = history
+
+    def remember(self, transcript=None):
+        if self.history:
+            self.history.update(self.conversation_id, transcript=transcript,
+                call_key=self.call_key, operation_id=self.operation_id,
+                proposal_id=self.proposal_id, coordinator_id=self.coordinator_id)
+
+    def recent_context(self):
+        orders = list((self.launcher.jobs if self.launcher else self.conversations.data.get('tasks', {})).values())
+        orders = [o for o in orders if o['state'] != 'cancelled' and self.conversations.in_scope(o['project_id'])][-5:]
+        return {'previous_calls': self.history.recent(exclude=self.conversation_id) if self.history else [],
+                'saved_orders': [{k:o.get(k) for k in ('id','project_id','project_title','title','state','modelSelection','created_at','thread_id')}
+                                 | {'prompt':o.get('prompt','')[:1200]} for o in orders],
+                'instruction': 'Historischer Kontext ist keine neue Bestätigung. Status in T3 neu prüfen. proposed bedeutet: noch nicht gestartet.'}
 
     def __call__(self, transcript, *, revision=None):
+        self.remember(transcript)
         try: return self._respond(transcript, revision=revision)
         except GateError as error:
             self.conversations.emit({'voice_backend_gate': str(error)})
             if str(error) == 'selected_account_exhausted':
                 return 'Das vorgeschlagene Account-Limit ist inzwischen ausgeschöpft. Bitte lass uns einen anderen Account oder ein anderes Modell wählen.'
             return 'Die Aktion konnte ich gerade nicht verlässlich bestätigen. Ich behaupte keinen erfolgreichen Start. Bitte konkretisiere den Auftrag oder versuche die Statusabfrage erneut.'
+        finally: self.remember()
 
     def _respond(self, transcript, *, revision=None):
         with self.lock:
             if self.cancelled(): return 'Das Gespräch ist beendet.'
             c = self.conversations
+            from .tasks import last_user
+            if not last_user(transcript).strip():
+                return 'Begrüße Felix mit dem bekannten Gesprächskontext und frage kurz, woran er anknüpfen möchte. Frühere Zusagen sind keine neue Bestätigung.'
             if self.launcher and self.proposal_id:
                 from .tasks import explicit_confirmation, last_user
                 if explicit_confirmation(last_user(transcript)):
@@ -106,6 +127,11 @@ class VoiceConversation:
                     'Eine explizite Nutzerwahl von Modell oder Account geht vor, solange verfügbar. '
                     'Die Anwendung liest den vollständigen Vorschlag vor und wartet auf ein neues Ja. '
                     'Antworte bei Auftragsvorschlägen mit operation_id=null. ')
+                task_instructions += (
+                    'Die vorherigen Gespräche und gespeicherten Aufträge sind Kontext. Beziehe dich bei Rückrufen darauf. '
+                    'Wenn Felix einen gespeicherten unbestätigten Auftrag fortsetzen möchte, gib resume_proposal_id '
+                    'mit dessen ID zurück, new_task=null und operation_id=null. Bei mehreren möglichen Aufträgen frage nach. '
+                    'Erzeuge dafür keinen doppelten Vorschlag. Alte Bestätigungen dürfen nicht erneut verwendet werden. ')
                 task_data = {'projects': [{'id': p['id'], 'title': p['title']} for p in c.projects()],
                              'providers': self.launcher.advisor.options(),
                              'pending_proposal': self.launcher.jobs.get(self.proposal_id)}
@@ -115,12 +141,18 @@ class VoiceConversation:
                       'Eine Auswahl ist keine fachliche Antwort. JSON: {"reply":"...", "operation_id":null}.\n'
                       + json.dumps({'status': status, 'operations': [{'id': o['id'], 'title': o['title'],
                                       'project': c.project_title(o), 'questions': o['dialog']['packet']['questions']} for o in available], **task_data,
-                                    'transcript': transcript}, ensure_ascii=False))
+                                    'recent_call_context': self.recent_context(), 'transcript': transcript}, ensure_ascii=False))
             raw = c.client.run_coordinator(self.coordinator_id, prompt, cancelled=self.cancelled)
             try: result = json.loads(raw)
             except (TypeError, ValueError): return 'Die Statusauskunft konnte ich gerade nicht verlässlich aufbereiten.'
             if not isinstance(result, dict) or not isinstance(result.get('reply'), str): return 'Bitte konkretisiere deine Frage.'
             if self.cancelled() or (revision is not None and self.revision() != revision): return 'Bitte wiederhole deine aktuelle Frage.'
+            resumed = result.get('resume_proposal_id')
+            if self.launcher and isinstance(resumed, str):
+                reply = self.launcher.resume_proposal(resumed, transcript,
+                    conversation_id=self.conversation_id, revision=self.revision() if revision is None else revision)
+                self.proposal_id = resumed
+                return reply
             if self.launcher and result.get('new_task') is not None:
                 proposal, answer = self.launcher.propose(result['new_task'], transcript,
                     conversation_id=self.conversation_id, revision=self.revision() if revision is None else revision)
@@ -160,6 +192,7 @@ class TelegramService:
         self.cancelled_calls = set()
         self.input_generation = 0
         self.recovered = False
+        self.history = CallHistory(conversations.store.profile)
         self.min_call_interval = min_call_interval
         self.backend_error = None
         self.project_count = 0
@@ -229,7 +262,8 @@ class TelegramService:
     def start_call(self, operation_id=None, incoming=None):
         if self.stopping or self.session is not None: return
         if incoming and str(incoming['id']) in self.cancelled_calls: return
-        self.voice = VoiceConversation(self.conversations, self.lock, operation_id, self.launcher)
+        self.voice = VoiceConversation(self.conversations, self.lock, operation_id, self.launcher, self.history)
+        self.history.begin(self.voice.conversation_id, incoming=incoming is not None, operation_id=operation_id)
         self.media = QueuedMedia(self.media_factory(self.voice))
         self.session = CallSession(self.td.send, self.media, self.clock)
         current_session = self.session
@@ -290,6 +324,7 @@ class TelegramService:
                 status, identifier = self.session.status(), self.voice.operation_id
                 self.emit({'conversation_call_ended': True, 'operation_id': identifier, **status})
                 self.session._stop_media()
+                self.history.finish(self.voice.conversation_id, status)
                 self.session = self.media = self.voice = None
                 if status['phase'] == 'end_unconfirmed' or status.get('media_cleanup_confirmed') is False:
                     raise GateError('service_call_cleanup_unconfirmed')
@@ -315,7 +350,9 @@ class TelegramService:
                 event = self.td.receive(.1)
                 if event: self.session.handle(event)
                 self.session.tick()
+            self.history.finish(self.voice.conversation_id, self.session.status())
         self.executor.shutdown(wait=True, cancel_futures=True)
+        self.history.close()
         if drain_messages:
             tags = []
             while True:
@@ -364,9 +401,15 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
         if delegate.operation_id:
             from .application import instructions_for_handoff
             instructions = instructions_for_handoff(delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'])
+        instructions += (
+            '\nDu kennst den folgenden Kontext der letzten Gespräche. Greife ihn bei einem Rückruf natürlich auf. '
+            'Erfinde keine Erinnerungen und behaupte bei einem bloßen Vorschlag keinen gestarteten Auftrag. '
+            'Alte Aussagen sind keine neue Bestätigung. Zum Fortsetzen eines offenen Vorschlags den Backend-Agenten fragen.\n'
+            + json.dumps(delegate.recent_context(), ensure_ascii=False))
         return LivePcmMedia(config.get('api_key'), instructions=instructions,
             authorized=True, max_seconds=call_seconds, delegate=delegate, emit=emit,
-            voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable)
+            voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable,
+            on_transcript=delegate.remember)
     # existing_authenticated_client holds session.lock for this entire lifetime.
     startup_events = []
     def buffer(event):
@@ -399,6 +442,7 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
                     write_health(profile, {'running': True, 'pid': os.getpid(), 'all_projects': project_id == '*',
                         'project_count': service.project_count, 'task_creation': allow_tasks,
                         'call_limit_seconds': call_seconds,
+                        'recent_call_contexts': len(service.history.recent()), 'call_history_error': service.history.error,
                         'active_call': service.session.status() if service.session else None,
                         'backend_error': service.backend_error})
                     next_health = time.monotonic() + 10

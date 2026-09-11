@@ -42,7 +42,7 @@ Ein einzelnes Gespräch ist auf ausdrücklichen Nutzerwunsch auf 1200 Sekunden (
 
 ## Nachweise
 
-- 145 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
+- 154 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
 - Gegen echtes T3 wurde ein synthetischer Auftrag in einem eigenen Git-Testprojekt gestartet. Mit der vorgeschlagenen Provider-/Modellauswahl entstand eine Begrüßungsfunktion samt unittest; der Test wurde unabhängig erneut erfolgreich ausgeführt. Dieser Nachweis belegt den echten Thread-/Implementierungspfad, nicht die sprachliche Erkennung eines neuen Feature-Auftrags.
 - Die zuvor gemeinsam geprüften echten Telegram-Dialoge, Rückrufe, Statusanrufe und Auflegebitten bleiben in [evidence.md](evidence.md) dokumentiert.
 
@@ -52,6 +52,12 @@ Nach einem Nutzerbericht über einen stummen Anruf wurde der Medienstart korrigi
 
 Der LaunchAgent verwendet `ProcessType=Interactive` und `LegacyTimers=true`. Ein lokaler Vergleich zeigte, dass die vorherige Hintergrundklassifikation die 10-ms-Taktschleife auf ungefähr ein Zehntel der erforderlichen Frequenz drosselte. Die korrigierte Konfiguration liefert im Vergleichstest 300 statt 30 Durchläufe in drei Sekunden. Details und die noch ausstehende erneute Hörbestätigung stehen in `evidence.md`.
 
-## Rückruf und bestehender Thread
+## Kontext beim Rückruf
 
-Ein erneuter Anruf beginnt mit einem neuen Gesprächskoordinator. Bestehende T3-Arbeits-Threads bleiben unabhängig vom Telefonat erhalten. Offene Ask-Vorgänge können anhand ihrer gespeicherten Zuordnung im selben Arbeits-Thread beantwortet werden. Ein bisher nur vorgeschlagener neuer Feature-Auftrag wird dagegen beim Rückruf noch nicht automatisch wieder als aktiver Vorschlag übernommen; die Gesprächsinstanz setzt `proposal_id` neu. Eine allgemeine nahtlose Fortsetzung des letzten Sprachgesprächs ist damit nicht zugesichert.
+Ein neuer Anruf bekommt bereits zum Sprachstart Kontext aus den letzten Gesprächen. Die API-Transkripte werden während des Telefonats lokal gespeichert, auch wenn keine Backend-Delegation stattfindet. Ein eigener Schreiber aktualisiert die private Datei `call-history.json` etwa einmal pro Sekunde; beim geordneten Ende wird abschließend gespeichert. Bei einem abrupten Prozessabbruch kann der letzte noch nicht gespeicherte Augenblick fehlen.
+
+Gespeichert werden höchstens acht Gesprächsverläufe mit jeweils maximal 24000 Textzeichen sowie Zuordnungen zu Vorgängen, Vorschlägen und Koordinatoren. Für den Sprachstart werden begrenzte Ausschnitte der letzten fünf Gespräche und die aktuellen gespeicherten Auftragszustände verwendet. Die Datei ist nur für den lokalen Benutzer lesbar. Audio wird dadurch nicht aufgenommen. Gängige API-Key-, Bearer- und Passwortformen werden im Text ausgeblendet.
+
+Ein neuer Gesprächskoordinator kann mit diesem Kontext anknüpfen. Bestehende T3-Arbeits-Threads bleiben unabhängig vom Telefonat erhalten. Offene Ask-Vorgänge behalten ihre Zuordnung. Ein unbestätigter Feature-Vorschlag kann über seine bestehende ID wieder aufgegriffen werden; der Agent liest Projekt, Auftrag und Modellauswahl erneut vor. Erst eine neue Bestätigung im aktuellen Anruf startet den vorgesehenen Arbeits-Thread. Historische Ja-Aussagen oder eine Begrüßung lösen keinen Start aus.
+
+Für den ersten Anruf nach dieser Erweiterung wurde ein eindeutig über die Vorschlags-ID zuordenbarer Teil des vorherigen helth-Gesprächs aus dem T3-Koordinatorverlauf wiederhergestellt. Dieser Datensatz ist als teilweise wiederhergestellter Verlauf gekennzeichnet. Der echte helth-Auftrag wurde dabei weder bestätigt noch gestartet.

@@ -53,7 +53,7 @@ def decode_audio(event):
 class LiveVoice:
     def __init__(self, api_key, *, instructions, audio_out, on_failure=lambda: None,
                  on_hangup=lambda: None, delegate=None, max_seconds=120, emit=lambda status: None, connector=None,
-                 voice=DEFAULT_VOICE):
+                 voice=DEFAULT_VOICE, on_transcript=lambda transcript: None):
         if not isinstance(api_key, str) or not api_key.startswith("sk-"):
             raise GateError("openai_api_key_required")
         if type(max_seconds) is not int or not 1 <= max_seconds <= 1200:
@@ -71,6 +71,7 @@ class LiveVoice:
         self.close_confirmed = False
         self.failure = None
         self.transcript = []
+        self.on_transcript = on_transcript
         self.transcript_chars = 0
         self.input_revision = 0
         self.input_bytes = self.output_bytes = 0
@@ -151,6 +152,7 @@ class LiveVoice:
                         elif self.transcript and self.transcript[-1]["role"] == role:
                             self.transcript[-1]["text"] += text
                         else: self.transcript.append({"role": role, "text": text})
+                        self.on_transcript([dict(message) for message in self.transcript])
                     elif kind == "session.delegation.created":
                         delegation = event.get("delegation", {})
                         identifier = delegation.get("id")
@@ -274,7 +276,8 @@ class PcmOutputPacer:
 
 class LivePcmMedia:
     def __init__(self, api_key, *, instructions, authorized=False, max_seconds=120,
-                 delegate=None, emit=lambda status: None, voice=DEFAULT_VOICE, native_executable=None):
+                 delegate=None, emit=lambda status: None, voice=DEFAULT_VOICE, native_executable=None,
+                 on_transcript=lambda transcript: None):
         self.available = authorized is True
         self.stopping = False
         self.connected = threading.Event()
@@ -285,7 +288,7 @@ class LivePcmMedia:
         native_options = {} if native_executable is None else {'executable': native_executable}
         self.native = NativePcmMedia(on_pcm=self._from_phone, allow_audio=authorized, **native_options)
         self.voice = LiveVoice(api_key, instructions=instructions, audio_out=self._to_phone,
-                               max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice)
+                               max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice, on_transcript=on_transcript)
         self.output_pacer = PcmOutputPacer(self._send_pcm, self.stop_event.wait)
 
     def _from_phone(self, data):

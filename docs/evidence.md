@@ -152,3 +152,13 @@ Der produktive LaunchAgent wurde auf `Interactive` mit präzisen Timern umgestel
 Der Nutzer berichtete nach der Timer-Korrektur über ein dreiminütiges Gespräch mit anschließendem Abbruch. Die eigene 180-Sekunden-Grenze war sowohl im Dienst als auch in Sprach- und nativer Medienlaufzeit aktiv. Auf ausdrücklichen Auftrag wurden diese Grenzen auf 1200 Sekunden erhöht. Die native Laufzeit wurde separat neu kompiliert und gelinkt; elf Descriptor-/IPC-Prüfungen, der PCM-Selbsttest und 145 Offline-Tests bestehen. Die aktive Zustandsmeldung enthält jetzt `call_limit_seconds=1200`. Ein vollständiger 20-minütiger Live-Durchlauf wurde nicht durchgeführt.
 
 Zum Rückruf wurde der aktuelle Vorgang geprüft: Der zuletzt besprochene helth-Auftrag war noch `proposed`; für die reservierte Arbeits-Thread-ID meldete T3 HTTP 404. Es wurde weder ein Auftrag bestätigt noch erneut gestartet. Bestehende Arbeits-Threads bleiben beim Auflegen erhalten, aber ein Rückruf übernimmt einen unbestätigten Feature-Vorschlag derzeit nicht automatisch.
+
+## Dauerhafter Kontext für Rückrufe
+
+Auf ausdrücklichen Nutzerauftrag wurde ein privates Gesprächsjournal ergänzt. API-Transkripte werden fortlaufend außerhalb der Medien-Empfangsschleife gespeichert. Start, Ende und die Verknüpfung zu Vorschlag, Vorgang und Koordinator bleiben auch über Dienstneustarts hinweg verfügbar. Frühere Transkripte werden als historischer Kontext behandelt und niemals als aktuelle Nutzerbestätigung an den Auftragsstarter übergeben.
+
+Ein partieller Verlauf des vorherigen echten helth-Gesprächs wurde über die eindeutige `conversation_id` des vorhandenen Vorschlags aus einem T3-Koordinatorprompt wiederhergestellt. Die Zuordnung erfolgte nicht allein anhand eines ähnlichen Titels. Der echte Vorschlag blieb unverändert und ungestartet.
+
+154 Offline-Tests bestehen. Neue Fälle prüfen fortlaufende Transkriptübernahme ohne Backend-Delegation, Neustart nach Abbruch, begrenzte Aufbewahrung, Redaktion, frischen Bestätigungsbedarf und Wiederaufnahme derselben Vorschlags-ID ohne doppelten Auftrag. Zusätzlich wurde ein synthetischer Rückruf gegen den echten T3-Koordinator mit kopiertem Vorgangszustand geprüft: Er griff den vorhandenen helth-Vorschlag auf, legte keinen zweiten Vorschlag an und verlangte eine neue Bestätigung. Der reale Auftragszustand wurde unverändert zurückgelesen.
+
+Der feste Release wurde aktiviert. Die Zustandsmeldung zeigt 19 Projekte, `call_limit_seconds=1200`, einen verfügbaren vorherigen Gesprächskontext und keinen Journal- oder Backend-Fehler. Ein tatsächlicher gesprochener Rückruf mit dieser Erweiterung wurde in diesem Prüflauf nicht durchgeführt.

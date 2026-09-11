@@ -47,9 +47,24 @@ class TaskLauncher:
                     'thread_id': str(uuid.uuid4()), 'created_at': now()}
         self.jobs[identifier] = proposal
         self.c.store.save()
-        return proposal, (f"Ich schlage vor: {proposal['project_title'][:80]}, {proposal['title']}. "
+        return proposal, self.proposal_text(proposal)
+
+    def proposal_text(self, proposal):
+        return (f"Ich schlage vor: {proposal['project_title'][:80]}, {proposal['title']}. "
             f"Auftrag: {proposal['prompt'][:350]} " + self.advisor.describe(proposal['modelSelection']) +
             f" Grund: {proposal['reason'].split('. ', 1)[0][:180]}. Soll ich diesen Auftrag jetzt in einem neuen T3-Thread starten?")
+
+    def resume_proposal(self, identifier, transcript, *, conversation_id, revision):
+        proposal = self.jobs.get(identifier)
+        if proposal is None or proposal['state'] != 'proposed':
+            raise GateError('pending_task_proposal_required')
+        if not self.c.in_scope(proposal['project_id']): raise GateError('task_project_no_longer_available')
+        self.advisor.refresh(force=True)
+        reply = self.proposal_text(proposal)
+        proposal.update(conversation_id=conversation_id, revision=revision,
+                        proposal_user_text='', resume_request_quote=last_user(transcript), resumed_at=now())
+        self.c.store.save()
+        return reply
 
     def confirm(self, identifier, transcript, *, revision, cancelled=lambda: False):
         job = self.jobs[identifier]
