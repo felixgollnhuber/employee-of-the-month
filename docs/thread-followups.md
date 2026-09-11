@@ -2,7 +2,7 @@
 
 Die Telefonbrücke kann eine ausdrücklich adressierte Nachricht als normalen T3-Nutzerturn an einen bestehenden Thread senden. Das funktioniert unabhängig von einem früheren Telefonvorgang und auch bei laufenden, completed oder settled Threads.
 
-## Formulierung
+## Explizite Formulierung
 
 Beispiele für Sprache und Telegram-Text:
 
@@ -11,7 +11,21 @@ Beispiele für Sprache und Telegram-Text:
 - `Sag dem Thread „vollständiger Titel“, dass bitte auch der Fehlerfall geprüft werden soll.`
 - Bei gleichen Titeln: `Sende an Thread thread-id: deine Nachricht.`
 
-Ziel und Nachrichteninhalt müssen in derselben aktuellen Nutzeraussage stehen. Titel werden vollständig und ohne Unterscheidung der Groß-/Kleinschreibung verglichen. Teiltreffer, Ähnlichkeitsranking, frühere Gesprächsinhalte oder der zuletzt aktive Vorgang wählen niemals das Ziel. Mehrere passende Threads führen zu einer Rückfrage mit Projekt und Thread-ID. Felix wiederholt danach den vollständigen Sendewunsch mit dieser ID. Unvollständige Sendewünsche führen zu einer Bitte um eindeutige Formulierung. Freie Paraphrasen außerhalb der dokumentierten Formen werden nicht als Sendeberechtigung interpretiert.
+Bei einer expliziten Einzelaussage stehen Ziel und Nachrichteninhalt weiterhin zusammen. Titel werden vollständig und ohne Unterscheidung der Groß-/Kleinschreibung verglichen. Teiltreffer und Ähnlichkeitsranking wählen niemals das Ziel. Mehrere passende Threads führen zu einer Rückfrage mit Projekt und Thread-ID.
+
+## Natürlicher Gesprächskontext
+
+Im Telefongespräch darf Felix Ziel und Inhalt auch natürlich über mehrere Aussagen festlegen. Die Brücke merkt ausschließlich einen im aktuellen Nutzertranskript exakt genannten vollständigen Thread-Titel oder eine Thread-ID. Diese sitzungsgebundene Auswahl gilt höchstens vier weitere Nutzeraussagen und wird bei einem anderen exakt genannten Thread ersetzt. Historische Anrufe, der zuletzt aktive Vorgang, Titelähnlichkeit oder die Reihenfolge der T3-Shell dürfen kein Ziel auswählen.
+
+Beispiele:
+
+- Nach „Ich meine den Thread Nachrichten an abgeschlossene T3-Threads senden“ genügt „Schick dort Test hin“.
+- Nach „Beim Thread Nachrichten an abgeschlossene T3-Threads senden: Die Nachricht ist Test“ genügt „Mach das“.
+- Fehlt das Ziel, fragt die Brücke nach Titel oder Thread-ID und akzeptiert die natürliche Antwort.
+- Fehlt der Inhalt, fragt die Brücke nach der Nachricht und verwendet die nächste eindeutige Antwort als Inhalt.
+- Bei gleichen Titeln nennt die Brücke die passenden Projekte und IDs. Die anschließende Auswahl per ID setzt den begonnenen Sendewunsch fort.
+
+Diese Kontextbindung gilt nur innerhalb des laufenden Telefonats. Telegram-Text ohne Gesprächssitzung verwendet weiterhin die explizite Einzelaussage. Ein Themenwechsel zu einem T3-Rückfragevorgang oder neuen Auftragsvorschlag verwirft die Bindung. „Mach das“ ohne eindeutig gebundenes Ziel und Inhalt löst keine Folgenachricht aus.
 
 ## Getrennte Dialogwege
 
@@ -31,7 +45,7 @@ Nur der Readback von Message-ID, Rolle und identischem Text im richtigen Thread/
 
 ## Offline-Nachweis und Auslieferung
 
-`tests/test_followups.py` prüft laufende, completed und settled Threads, den oben genannten Zieltitel, offene Rückfragen, identische Titel in verschiedenen Projekten, unbekannte und unzulässige Ziele, Identitätswechsel, alte Gesprächsinhalte, Vorschlagsbindung, veraltete Sprachrevisionen, doppelte Zustellung, Neustart, Speicherfehler und unklare Netzwerk-/Readback-Ergebnisse. Die übrigen Tests prüfen weiterhin die bestehende Rückfrage- und Auftragsbestätigung.
+`tests/test_followups.py` prüft laufende, completed und settled Threads, den Zieltitel „Nachrichten an abgeschlossene T3-Threads senden“, natürliche deiktische Aussagen, „Mach das“, getrennt genannte Ziele und Inhalte, gezielte Rückfragen, identische Titel in verschiedenen Projekten, Auswahl per ID, offene Rückfragen, unbekannte und unzulässige Ziele, Identitätswechsel, alte Gesprächsinhalte, Vorschlagsbindung, veraltete Sprachrevisionen, doppelte Zustellung, Neustart, Speicherfehler und unklare Netzwerk-/Readback-Ergebnisse. Die übrigen Tests prüfen weiterhin die bestehende Rückfrage- und Auftragsbestätigung.
 
 Damit wäre die Beispielnachricht an „Gesprächskoordination-Threads automatisch setteln“ nach Auslieferung korrekt zustellbar, sofern dieser Titel dann eindeutig vorhanden, verfügbar und ohne offene Rückfrage ist. Das ist ein synthetischer Offline-Nachweis mit dem exakten Titel, keine Prüfung des aktuellen produktiven Threads. Es wurde keine Produktivnachricht versendet und keine laufende Installation aktualisiert.
 

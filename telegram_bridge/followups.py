@@ -9,10 +9,12 @@ from .t3 import now
 
 
 def parse_followup(text):
-    # Deliberately require a message boundary. Never guess payload or target from history.
-    intent = (re.search(r'(?i)\bthreads?\b', text) and re.search(
-        r'(?i)\b(?:sende|senden|schicke|schicken|schick|sag|sage|sagen|schreib|schreibe|schreiben|übermittle|übermitteln|antworte|antworten|weiterleiten|weitergeben|Nachricht|Folgenachricht)\b', text))
-    if not intent:
+    # Explicit one-shot form. Contextual follow-ups are resolved separately and
+    # may only use an exact thread mention from the current call.
+    if re.match(
+            r'(?is)^\s*(?:nein[,\s]+)?(?:bitte\s+)?'
+            r'(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle|antworte)\s+'
+            r'(?:bitte\s+)?(?:nicht|nichts|keine)\b', text):
         return None
     match = re.fullmatch(
         r'(?is)\s*(?:bitte\s+)?(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle|antworte)'
@@ -20,9 +22,55 @@ def parse_followup(text):
         r'(?:(?:an|in)\s+(?:den\s+)?|dem\s+)?(?:bestehenden\s+)?Thread\s+'
         r'(?P<target>.+?)\s*(?::|,\s*(?:dass|Folgenachricht)\s+|\s+(?:mit der|die) Nachricht\s+)\s*(?P<message>.+?)\s*', text)
     if not match:
-        return {}
+        intent = (re.search(
+            r'(?is)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle|antworte)\b.*\bthreads?\b', text)
+            or re.search(r'(?is)^\s*(?:eine|die)\s+(?:Nachricht|Folgenachricht)\b.*\bthreads?\b', text)
+            or re.search(r'(?is)^\s*kannst\s+du\b.*\bthreads?\b', text))
+        return {} if intent else None
     target = match['target'].strip().strip('"„“»«')
     return {'target': target, 'text': match['message'].strip()}
+
+
+def contextual_send(text):
+    """Return (intent, payload) for a deictic send request in the current utterance."""
+    if re.search(r'(?is)\b(?:nicht|nichts|keine)\b.{0,50}\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', text):
+        return False, None
+    if re.search(r'(?is)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b.{0,50}\b(?:nicht|nichts|keine)\b', text):
+        return False, None
+    verb = r'(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)'
+    there = r'(?:dort|dahin|dorthin|da\s+hin)'
+    match = re.fullmatch(
+        rf'(?is)\s*(?:ja[,\s]+)?(?:bitte\s+)?{verb}\s+(?:bitte\s+)?'
+        rf'(?:(?:die|eine)\s+(?:Nachricht|Folgenachricht)\s+)?{there}\s+(?:bitte\s+)?(?P<message>.+?)\s*[.!]?\s*', text)
+    if not match:
+        match = re.fullmatch(
+            rf'(?is)\s*(?:ja[,\s]+)?(?:bitte\s+)?{verb}\s+(?:bitte\s+)?'
+            rf'(?P<message>.+?)\s+{there}(?:\s+hin)?\s*[.!]?\s*', text)
+    if match:
+        message = re.sub(r'(?is)\s+hin\s*$', '', match['message']).strip()
+        return True, message
+    intent = bool(re.search(rf'(?is)\b{verb}\b', text) and re.search(rf'(?is)\b{there}\b', text))
+    return intent, None
+
+
+def contextual_message(text):
+    match = re.search(
+        r'(?is)\b(?:die\s+)?(?:Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt)\s+'
+        r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\s*[:,-]?\s*(?P<message>.+?)\s*[.!]?\s*$', text)
+    return match['message'].strip().rstrip('.!') if match else None
+
+
+def contextual_confirmation(text):
+    normalized = ' '.join(re.sub(r'[.,!?]', ' ', text.casefold()).split())
+    return normalized in {
+        'mach das', 'mach es', 'tu das', 'ja mach das', 'ja mach es', 'ja tu das',
+        'schick sie', 'schick sie ab', 'sende sie', 'ja schick sie', 'ja sende sie',
+    }
+
+
+def contextual_cancel(text):
+    normalized = ' '.join(re.sub(r'[.,!?]', ' ', text.casefold()).split())
+    return normalized in {'nein', 'abbrechen', 'doch nicht', 'lass das', 'nicht senden', 'nichts senden'}
 
 
 class Followups:
@@ -34,12 +82,45 @@ class Followups:
         spec = parse_followup(text)
         if spec is None:
             return None
-        if not spec or len(spec['text']) > 8000:
-            return 'Bitte nenne Ziel und Nachricht ausdrücklich: Sende an Thread „vollständiger Titel oder Thread-ID“: deine Nachricht.'
+        if not spec:
+            mentions = self.mentioned_targets(text)
+            if len(mentions) == 1:
+                return f'Welche Nachricht soll ich an den T3-Thread „{mentions[0].get("title")}“ senden?'
+            if len(mentions) > 1:
+                return self.ambiguous_reply(mentions)
+            return 'Welchen T3-Thread meinst du, und welche Nachricht soll ich dorthin senden?'
+        return self.handle_spec(spec, text, event_id, cancelled=cancelled)
+
+    def mentioned_targets(self, text):
+        shell = self.c.client.request('/api/orchestration/shell')
+        projects = {p['id']: p for p in self.c.projects(shell)}
+        folded = text.casefold()
+        result = []
+        for thread in shell.get('threads', []):
+            if thread.get('projectId') not in projects or self.c.is_internal(thread):
+                continue
+            identifier = str(thread.get('id', ''))
+            title = str(thread.get('title', ''))
+            id_match = bool(identifier and re.search(r'(?<!\w)' + re.escape(identifier.casefold()) + r'(?!\w)', folded))
+            if id_match or (title and title.casefold() in folded):
+                result.append({**thread, 'project_title': projects[thread['projectId']].get('title', thread['projectId'])})
+        return result
+
+    @staticmethod
+    def ambiguous_reply(candidates):
+        choices = '\n'.join(
+            f"{t['id']}: {t.get('title')} ({t.get('project_title', t['projectId'])})" for t in candidates)
+        return 'Mehrere Threads passen. Welchen davon meinst du? Bitte nenne die eindeutige Thread-ID.\n' + choices
+
+    def handle_spec(self, spec, input_text, event_id, *, cancelled=lambda: False):
+        if (not isinstance(spec, dict) or not isinstance(spec.get('target'), str)
+                or not isinstance(spec.get('text'), str) or not spec['text'].strip()
+                or len(spec['text']) > 8000):
+            raise GateError('invalid_followup_spec')
         key = hashlib.sha256(event_id.encode()).hexdigest()
         existing = self.entries.get(key)
         if existing:
-            if existing['input'] != text:
+            if existing['input'] != input_text:
                 raise GateError('followup_event_conflict')
             return self.receipt(existing)
         shell = self.c.client.request('/api/orchestration/shell')
@@ -48,9 +129,9 @@ class Followups:
                       and not t.get('deletedAt') and not t.get('archivedAt') and not self.c.is_internal(t)
                       and spec['target'].casefold() in (t['id'].casefold(), t.get('title', '').casefold())]
         if len(candidates) != 1:
-            choices = '\n'.join(f"{t['id']}: {t.get('title')} ({projects[t['projectId']].get('title', t['projectId'])})" for t in candidates)
-            return ('Mehrere Threads passen. Bitte wiederhole die Folgenachricht mit der eindeutigen Thread-ID.\n' + choices
-                    if candidates else 'Diesen Thread kann ich nicht eindeutig finden. Bitte wiederhole die Folgenachricht mit dem vollständigen Titel oder der Thread-ID.')
+            choices = [{**t, 'project_title': projects[t['projectId']].get('title', t['projectId'])} for t in candidates]
+            return (self.ambiguous_reply(choices) if candidates
+                    else 'Diesen T3-Thread kann ich nicht eindeutig finden. Es wurde nichts gesendet.')
         target = candidates[0]
         snapshot = self.c.client.snapshot(target['id'])
         source = snapshot['thread']
@@ -67,7 +148,7 @@ class Followups:
         if uncertain:
             return self.receipt(uncertain)
         command_id = 'voice-followup-' + key
-        entry = {'input': text, 'thread_id': source['id'], 'project_id': source['projectId'],
+        entry = {'input': input_text, 'thread_id': source['id'], 'project_id': source['projectId'],
                  'title': source.get('title'), 'state': 'reserved',
                  'command': {'type': 'thread.turn.start', 'commandId': command_id, 'threadId': source['id'],
                              'message': {'messageId': str(uuid.uuid5(uuid.NAMESPACE_URL, command_id)),
