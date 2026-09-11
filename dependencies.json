@@ -1,0 +1,28 @@
+{
+  "tdlib": {
+    "repository": "https://github.com/tdlib/td.git",
+    "revision": "d1085f9cebc5a62379991ae1652673954f229c1f",
+    "license": "BSL-1.0",
+    "target": "tdjson"
+  },
+  "tgcalls": {
+    "repository": "https://github.com/TelegramMessenger/tgcalls.git",
+    "revision": "e3069322a3d1e16ecb11a5e302242e59ddd7f09e",
+    "initial_standalone_revision": "efd330ca04f74706024a5abdfb5b41f4e4dd1065",
+    "license": "LGPL-3.0",
+    "status": "build in the exact Telegram-iOS parent dependency tree; never mix with unrelated SharedHeaders"
+  },
+  "media_parent": {
+    "repository": "https://github.com/TelegramMessenger/Telegram-iOS.git",
+    "revision": "6ad963e5b62d354da79040f388ae2b9132fb17b8",
+    "tgcalls_path": "submodules/TgVoipWebrtc/tgcalls",
+    "webrtc_repository": "https://github.com/ali-fareed/webrtc.git",
+    "webrtc_path": "third-party/webrtc/webrtc",
+    "webrtc_revision": "3817e906cb6c22ec9cc62023b073e1a668d9cb33"
+  },
+  "bazel": {
+    "version": "8.4.2",
+    "url": "https://github.com/bazelbuild/bazel/releases/download/8.4.2/bazel-8.4.2-darwin-arm64",
+    "sha256": "45e9388abf21d1107e146ea366ad080eb93cb6a5f3a4a3b048f78de0bc3faffa"
+  }
+}
