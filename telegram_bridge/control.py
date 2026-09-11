@@ -79,6 +79,7 @@ class CallSession:
 
     def status(self):
         return {"phase": self.phase, "reason": self.reason, "call_id": self.call_id,
+                "media_was_connected": self.connected_at is not None,
                 "media_connected": self.phase == "active", "audio_only": True,
                 "media_cleanup_confirmed": self.media_cleanup_confirmed}
 

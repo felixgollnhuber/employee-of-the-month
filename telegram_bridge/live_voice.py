@@ -87,10 +87,11 @@ class LiveVoice:
         try: self.input.put_nowait(data)
         except queue.Full: raise GateError("live_input_backpressure") from None
 
-    def start(self):
+    def start(self, *, wait=True):
         if self.thread is not None: raise GateError("live_session_already_used")
         self.thread = threading.Thread(target=self._thread_main, daemon=True)
         self.thread.start()
+        if not wait: return
         if not self.ready.wait(15) or not self.started:
             self.stopping.set()
             raise GateError(self.failure or "live_start_timeout")
@@ -115,6 +116,7 @@ class LiveVoice:
                              open_timeout=10, close_timeout=3, max_size=1024*1024, compression=None) as ws:
             closed = asyncio.Event()
             delegations = asyncio.Queue(maxsize=16)
+            output_audio = asyncio.Queue(maxsize=160)
             seen_delegations = set()
             hangup_at = None
             started_at = time.monotonic()
@@ -129,9 +131,9 @@ class LiveVoice:
                     elif kind == "session.output_audio.delta":
                         data = decode_audio(event)
                         if not self.stopping.is_set():
-                            for offset in range(0, len(data), 64000):
-                                await asyncio.to_thread(self.audio_out, data[offset:offset+64000])
-                            self.output_bytes += len(data)
+                            for offset in range(0, len(data), 6400):
+                                try: output_audio.put_nowait(data[offset:offset+6400])
+                                except asyncio.QueueFull: raise GateError('live_output_backpressure') from None
                     elif kind in ("session.input_transcript.delta", "session.output_transcript.delta"):
                         text = event.get("delta", "")
                         if not isinstance(text, str) or len(text) > 16000: raise GateError("invalid_live_transcript")
@@ -181,6 +183,12 @@ class LiveVoice:
                         await send({"type": "session.input_audio.append", "audio": base64.b64encode(data).decode()})
                         self.input_bytes += len(data)
 
+            async def audio_player():
+                while not self.stopping.is_set():
+                    data = await output_audio.get()
+                    await asyncio.to_thread(self.audio_out, data)
+                    self.output_bytes += len(data)
+
             async def delegate_worker():
                 while True:
                     identifier = await delegations.get()
@@ -203,10 +211,13 @@ class LiveVoice:
                                         "content": reply[offset:offset+240]})
 
             await send(session_start(self.instructions,self.voice))
-            tasks = [asyncio.create_task(receive()), asyncio.create_task(audio_sender()), asyncio.create_task(delegate_worker())]
+            tasks = [asyncio.create_task(receive()), asyncio.create_task(audio_sender()),
+                     asyncio.create_task(delegate_worker()), asyncio.create_task(audio_player())]
             reader = tasks[0]
             try:
                 while not self.stopping.is_set() and time.monotonic() - started_at < self.max_seconds:
+                    if not self.started and time.monotonic() - started_at >= 15:
+                        raise GateError('live_start_timeout')
                     if (hangup_at is None and self.last_user_at is not None
                         and time.monotonic() - self.last_user_at >= 0.8
                         and wants_hangup(self.user_segment["text"])):
@@ -247,20 +258,46 @@ class LiveVoice:
         if self.started and not self.close_confirmed: raise GateError("live_stop_unconfirmed")
 
 
+class PcmOutputPacer:
+    """At most 100 ms of PCM ahead of real time, regardless of API burst size."""
+    def __init__(self, send, wait, clock=time.monotonic):
+        self.send, self.wait, self.clock = send, wait, clock
+        self.next_at = 0
+
+    def push(self, data):
+        for offset in range(0, len(data), 3200):
+            if self.wait(max(0, self.next_at-self.clock())): return
+            chunk = data[offset:offset+3200]
+            self.send(chunk)
+            self.next_at = max(self.next_at, self.clock()) + len(chunk)/(SAMPLE_RATE*2)
+
+
 class LivePcmMedia:
     def __init__(self, api_key, *, instructions, authorized=False, max_seconds=120,
                  delegate=None, emit=lambda status: None, voice=DEFAULT_VOICE, native_executable=None):
         self.available = authorized is True
         self.stopping = False
+        self.connected = threading.Event()
+        self.stop_event = threading.Event()
+        self.lifecycle_lock = threading.Lock()
+        self.voice_start_requested = False
+        self.emit = emit
         native_options = {} if native_executable is None else {'executable': native_executable}
         self.native = NativePcmMedia(on_pcm=self._from_phone, allow_audio=authorized, **native_options)
         self.voice = LiveVoice(api_key, instructions=instructions, audio_out=self._to_phone,
                                max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice)
+        self.output_pacer = PcmOutputPacer(self._send_pcm, self.stop_event.wait)
 
     def _from_phone(self, data):
-        if not self.stopping: self.voice.push_audio(data)
+        if not self.stopping and self.connected.is_set() and self.voice.started:
+            self.voice.push_audio(data)
 
     def _to_phone(self, data):
+        if not self.stopping: self.output_pacer.push(data)
+
+    def _send_pcm(self, data):
+        while not self.connected.wait(.1):
+            if self.stopping: return
         if not self.stopping: self.native.push_audio(data)
 
     def protocol(self): return self.native.protocol()
@@ -269,9 +306,20 @@ class LivePcmMedia:
         if not self.available: raise GateError("explicit_live_call_authorization_required")
         self.voice.on_failure = lambda: on_state("failed")
         self.voice.on_hangup = lambda: on_state("end_requested")
+        def native_state(state):
+            self.emit({'media_transport_state': state})
+            with self.lifecycle_lock:
+                if self.stopping: return
+                if state == 'connected':
+                    self.connected.set()
+                    if not self.voice_start_requested:
+                        self.voice_start_requested = True
+                        self.voice.start(wait=False)
+                elif state in ('reconnecting', 'failed'):
+                    self.connected.clear()
+            on_state(state)
         try:
-            self.native.start(ready, on_state, on_signal)
-            self.voice.start()
+            self.native.start(ready, native_state, on_signal)
         except BaseException:
             self.stop()
             raise
@@ -280,6 +328,8 @@ class LivePcmMedia:
     def relay_id(self): return self.native.relay_id()
 
     def stop(self):
-        self.stopping = True
+        with self.lifecycle_lock:
+            self.stopping = True
+            self.stop_event.set()
         try: self.voice.close()
         finally: self.native.stop()

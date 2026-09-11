@@ -42,8 +42,10 @@ Ein einzelnes Gespräch ist weiterhin auf 180 Sekunden begrenzt. Der Dienst selb
 
 ## Nachweise
 
-- 141 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
+- 145 Offline-Tests einschließlich zusätzlicher Fälle für mehrere Projekte, neu hinzugefügte Projekte, globalen Anrufabstand, getrennte Codex-Profile, unbekannte Limits, gültige Modelloptionen, bestätigte Thread-Anlage, Timeout-Abgleich, Wiederverwendung lokaler Call-IDs nach Neustart und Versand beim Beenden.
 - Gegen echtes T3 wurde ein synthetischer Auftrag in einem eigenen Git-Testprojekt gestartet. Mit der vorgeschlagenen Provider-/Modellauswahl entstand eine Begrüßungsfunktion samt unittest; der Test wurde unabhängig erneut erfolgreich ausgeführt. Dieser Nachweis belegt den echten Thread-/Implementierungspfad, nicht die sprachliche Erkennung eines neuen Feature-Auftrags.
 - Die zuvor gemeinsam geprüften echten Telegram-Dialoge, Rückrufe, Statusanrufe und Auflegebitten bleiben in [evidence.md](evidence.md) dokumentiert.
 
 Die vollständige Auftragsberatung wurde zusätzlich mit einem synthetischen Transkript gegen den echten T3-Koordinator geprüft: Für eine kleine Funktion schlug er Codex-1, GPT-5.6-Luna und Reasoning low vor, mit konkreter Restkapazität und Begründung. Der Vorschlag erzeugte noch keinen Arbeits-Thread und wurde nach der Prüfung verworfen. Ein dabei gefundener Altprojekt-Fall mit fehlendem Arbeitsverzeichnis wurde korrigiert: Gesprächskoordinatoren verwenden nur vorhandene Git-Arbeitsverzeichnisse.
+
+Nach einem Nutzerbericht über einen stummen Anruf wurde der Medienstart korrigiert: GPT-Live startet erst nach bestätigter Telegram-Medienverbindung. Echtzeitbegrenzung der PCM-Ausgabe und eine getrennte Empfangs-/Ausgabeverarbeitung sichern den Übergang ab. Der Fix ist aktiviert; der erneute Hörtest ist noch offen.

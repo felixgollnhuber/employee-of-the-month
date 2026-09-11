@@ -357,7 +357,8 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
     def media_factory(delegate):
         instructions = (
             'Du bist Mitarbeiter des Monats, Felix\' KI-Kollege. Sprich natürlich und knapp Deutsch. '
-            'Frage zunächst, worum es geht. Hole Aufgabenstatus und Rückfragen ausschließlich vom Backend. '
+            'Begrüße Felix sofort nach dem Verbindungsaufbau und frage, worum es geht. Warte für die Begrüßung nicht auf seine erste Aussage. '
+            'Hole Aufgabenstatus und Rückfragen ausschließlich vom Backend. '
             'Delegiere jede inhaltliche Aussage. Bestätige Rückgaben nur nach dem Backend-Ergebnis. '
             'Bei jetzt nicht respektiere die Vertagung. Bei einer Auflegebitte verabschiede dich kurz.')
         if delegate.operation_id:

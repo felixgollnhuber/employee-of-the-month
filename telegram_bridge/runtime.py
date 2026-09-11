@@ -96,7 +96,7 @@ class NativeIPC:
             if not result or result.get("ok") is not True:
                 code = result.get("error") if result else None
                 if code in ("audio_test_not_authorized", "exact_audio_devices_unavailable", "not_prepared",
-                            "session_already_used", "unsupported_version_or_direction", "media_not_started"):
+                            "session_already_used", "unsupported_version_or_direction", "media_not_started", "pcm_buffer_rejected"):
                     raise GateError("native_" + code)
                 raise GateError("native_request_rejected")
             return result
