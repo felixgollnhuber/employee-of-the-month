@@ -80,6 +80,18 @@ class LiveVoice:
         self.usage = None
         self.thread = None
         self._on_state = None
+        self.instructions_lock = threading.Lock()
+        self.instructions_sent = False
+
+    def extend_instructions(self, text):
+        """Add prefetched context while the phone still rings. Refused once session.start is out:
+        a later instructions.append may interrupt the model's current speech. Never raises:
+        optional context must not end a call or the service loop."""
+        with self.instructions_lock:
+            if self.instructions_sent or self.stopping.is_set(): return False
+            if not isinstance(text, str) or len(self.instructions) + len(text) > 48000: return False
+            self.instructions += text
+            return True
 
     def push_audio(self, data):
         if self.stopping.is_set(): return
@@ -198,6 +210,7 @@ class LiveVoice:
                     await asyncio.sleep(0.25)
                     revision = self.input_revision
                     transcript = [dict(x) for x in self.transcript]
+                    asked_at = time.monotonic()
                     if self.delegate:
                         if hasattr(self.delegate,"revision"):
                             reply = await asyncio.to_thread(self.delegate, transcript, revision=revision)
@@ -206,13 +219,18 @@ class LiveVoice:
                     else:
                         reply = "Dies ist ein Verbindungstest. Es ist noch keine konkrete T3-Rückfrage verbunden. Führe keine Projektaktionen aus."
                     if not isinstance(reply, str) or len(reply) > 1200: raise GateError("invalid_live_backend_reply")
+                    # The silence Felix hears per delegation; a duration only, never any text.
+                    self.emit({"backend_reply_seconds": round(time.monotonic()-asked_at, 2)})
                     if not self.stopping.is_set():
                         # Small chunks also stay below the documented append token limit.
                         for offset in range(0, len(reply), 240):
                             await send({"type": "session.commentary.append", "delegation_id": identifier,
                                         "content": reply[offset:offset+240]})
 
-            await send(session_start(self.instructions,self.voice))
+            with self.instructions_lock:
+                self.instructions_sent = True
+                start = session_start(self.instructions,self.voice)
+            await send(start)
             tasks = [asyncio.create_task(receive()), asyncio.create_task(audio_sender()),
                      asyncio.create_task(delegate_worker()), asyncio.create_task(audio_player())]
             reader = tasks[0]
@@ -304,6 +322,8 @@ class LivePcmMedia:
         if not self.stopping: self.native.push_audio(data)
 
     def protocol(self): return self.native.protocol()
+
+    def extend_instructions(self, text): return self.voice.extend_instructions(text)
 
     def start(self, ready, on_state, on_signal):
         if not self.available: raise GateError("explicit_live_call_authorization_required")

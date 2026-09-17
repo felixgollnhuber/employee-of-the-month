@@ -19,6 +19,33 @@ from .t3 import T3Client
 from .call_history import CallHistory
 
 
+def voice_instructions(packet, recent_context):
+    """Rules for the live voice: it leads the conversation and delegates only what T3 must act on."""
+    if packet is not None:
+        from .application import instructions_for_handoff
+        instructions = instructions_for_handoff(packet)
+    else:
+        instructions = (
+            'Du bist Mitarbeiter des Monats, Felix\' KI-Kollege. Sprich natürlich und knapp Deutsch. '
+            'Begrüße Felix sofort nach dem Verbindungsaufbau und frage, worum es geht. Warte für die Begrüßung nicht auf seine erste Aussage. '
+            'Du führst das Gespräch selbst. Fragen zu Aufgabenstand, offenen Rückfragen und früheren Gesprächen beantwortest du '
+            'direkt aus dem Kontext unten, ohne zu delegieren. Nenne nur, was dort steht; erfinde nichts. '
+            'Delegiere an das Backend nur, wenn in T3 etwas passieren oder frisch gelesen werden soll: '
+            'Felix benennt eine offene Rückfrage, über die er sprechen will: delegiere einmal, damit das Backend den Vorgang bindet. '
+            'Felix trifft eine Entscheidung: lies sie zuerst selbst konkret vor und delegiere erst nach seinem Ja. '
+            'Felix stellt eine Rückfrage, die der Kontext nicht beantwortet: sag kurz, dass du bei der Aufgabe nachfragst, und delegiere. '
+            'Felix will einen neuen Auftrag, einen gespeicherten Vorschlag fortsetzen oder eine Nachricht an einen Thread senden: delegiere. '
+            'Felix bestätigt oder verwirft etwas, das das Backend vorgelesen hat: delegiere diese Antwort sofort. '
+            'Felix will ausdrücklich den frischen Stand oder fragt nach etwas, das im Kontext fehlt: delegiere. '
+            'Behaupte eine Übertragung, einen Start oder eine Zustellung erst nach dem Backend-Ergebnis. '
+            'Bei jetzt nicht delegiere und respektiere die Vertagung. Bei einer Auflegebitte verabschiede dich kurz.')
+    return instructions + (
+        '\nDu kennst den folgenden Kontext der letzten Gespräche. Greife ihn bei einem Rückruf natürlich auf. '
+        'Erfinde keine Erinnerungen und behaupte bei einem bloßen Vorschlag keinen gestarteten Auftrag. '
+        'Alte Aussagen sind keine neue Bestätigung. Zum Fortsetzen eines offenen Vorschlags den Backend-Agenten fragen.\n'
+        + json.dumps(recent_context, ensure_ascii=False))
+
+
 class VoiceConversation:
     def __init__(self, conversations, lock, operation_id=None, launcher=None, history=None):
         self.conversations, self.lock, self.operation_id = conversations, lock, operation_id
@@ -34,6 +61,18 @@ class VoiceConversation:
         self.conversation_id = uuid.uuid4().hex
         self.history = history
         self.operations_in_call = {operation_id} if operation_id else set()
+        self.snapshots = {}
+
+    def status_snapshot(self, thread_id):
+        """Status reads may be a few seconds old within one call. Answers and T3 commands always read fresh."""
+        cached = self.snapshots.get(thread_id)
+        if cached is None or time.monotonic() - cached[0] >= 15:
+            cached = self.snapshots[thread_id] = (time.monotonic(), self.conversations.client.snapshot(thread_id))
+        return cached[1]
+
+    def call_context(self):
+        return ('\nStand in T3 zu Beginn dieses Anrufs. Beantworte Statusfragen direkt daraus:\n'
+                + self.conversations.status_brief(snapshot=self.status_snapshot))
 
     def remember(self, transcript=None):
         if self.history:
@@ -272,14 +311,10 @@ class VoiceConversation:
             from .tasks import last_user
             project_matches = [p for p in c.projects() if p.get('title') and p['title'].casefold() in last_user(transcript).casefold()]
             target_project = max(project_matches, key=lambda p: len(p['title']))['id'] if project_matches else None
-            status = c.status_text(target_project, last_user(transcript))
+            status = c.status_text(target_project, last_user(transcript), snapshot=self.status_snapshot)
             shell = c.client.request('/api/orchestration/shell')
             source = c.coordinator_source(shell)
             if source is None: return status
-            if self.coordinator_id is None:
-                template = c.client.snapshot(source['id'])['thread']
-                if self.launcher: template = {**template, 'modelSelection': self.launcher.advisor.coordinator_selection()}
-                self.coordinator_id = c.client.create_coordinator(template)
             task_instructions = ''
             task_data = {}
             if self.launcher:
@@ -314,7 +349,13 @@ class VoiceConversation:
                       + json.dumps({'status': status, 'operations': [{'id': o['id'], 'title': o['title'],
                                       'project': c.project_title(o), 'questions': o['dialog']['packet']['questions']} for o in available], **task_data,
                                     'recent_call_context': self.recent_context(), 'transcript': transcript}, ensure_ascii=False))
-            raw = c.client.run_coordinator(self.coordinator_id, prompt, cancelled=self.cancelled)
+            def coordinator():
+                if self.coordinator_id is None:
+                    template = c.client.snapshot(source['id'])['thread']
+                    if self.launcher: template = {**template, 'modelSelection': self.launcher.advisor.coordinator_selection()}
+                    self.coordinator_id = c.client.create_coordinator(template)
+                return c.client.run_coordinator(self.coordinator_id, prompt, cancelled=self.cancelled)
+            raw = c.structure(prompt, coordinator)
             try: result = json.loads(raw)
             except (TypeError, ValueError): return 'Die Statusauskunft konnte ich gerade nicht verlässlich aufbereiten.'
             if not isinstance(result, dict) or not isinstance(result.get('reply'), str): return 'Bitte konkretisiere deine Frage.'
@@ -459,6 +500,23 @@ class TelegramService:
             self.calls += 1
             self.session.start(self.conversations.data['target_id'], authorized=True, consent=True)
         self.emit({'conversation_call_started': True, 'operation_id': operation_id, 'incoming': incoming is not None})
+        self.prefetch_context(self.voice, backend)
+
+    def prefetch_context(self, voice, backend):
+        """Load the task status while the phone rings, so the voice answers status questions without a backend hop."""
+        extend = getattr(backend, 'extend_instructions', None)
+        if extend is None: return
+        def prefetch():
+            try: return voice.call_context()
+            except GateError as error:
+                self.emit({'voice_context_prefetch_failed': str(error)})
+            except Exception as error:
+                # Optional context: unexpected T3 data must never reach the service loop. Name only, no message.
+                self.emit({'voice_context_prefetch_failed': type(error).__name__})
+        def deliver(text):
+            if text and not extend(text): self.emit({'voice_context_prefetch_unused': True})  # Too late or too large.
+        try: self.submit(prefetch, deliver)
+        except GateError as error: self.emit({'voice_context_prefetch_failed': str(error)})
 
     def settle_after_call(self, voice, status):
         """Worker-side: the call is fully over, so its coordination threads may settle.
@@ -596,20 +654,8 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
     config = read_private_json(profile, 'live.json')
     from .live_voice import LivePcmMedia, DEFAULT_VOICE
     def media_factory(delegate):
-        instructions = (
-            'Du bist Mitarbeiter des Monats, Felix\' KI-Kollege. Sprich natürlich und knapp Deutsch. '
-            'Begrüße Felix sofort nach dem Verbindungsaufbau und frage, worum es geht. Warte für die Begrüßung nicht auf seine erste Aussage. '
-            'Hole Aufgabenstatus und Rückfragen ausschließlich vom Backend. '
-            'Delegiere jede inhaltliche Aussage. Bestätige Rückgaben nur nach dem Backend-Ergebnis. '
-            'Bei jetzt nicht respektiere die Vertagung. Bei einer Auflegebitte verabschiede dich kurz.')
-        if delegate.operation_id:
-            from .application import instructions_for_handoff
-            instructions = instructions_for_handoff(delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'])
-        instructions += (
-            '\nDu kennst den folgenden Kontext der letzten Gespräche. Greife ihn bei einem Rückruf natürlich auf. '
-            'Erfinde keine Erinnerungen und behaupte bei einem bloßen Vorschlag keinen gestarteten Auftrag. '
-            'Alte Aussagen sind keine neue Bestätigung. Zum Fortsetzen eines offenen Vorschlags den Backend-Agenten fragen.\n'
-            + json.dumps(delegate.recent_context(), ensure_ascii=False))
+        packet = delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'] if delegate.operation_id else None
+        instructions = voice_instructions(packet, delegate.recent_context())
         return LivePcmMedia(config.get('api_key'), instructions=instructions,
             authorized=True, max_seconds=call_seconds, delegate=delegate, emit=emit,
             voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable,
@@ -627,7 +673,9 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
         pump.on_event = buffer
         target = resolve_target(pump, require_target(read_profile(profile)))
         store = ConversationStore(profile, project_id, target.user_id, expand_scope=project_id == '*')
-        conversations = Conversations(store, client, lambda request: None, emit=emit)
+        from .structurer import Structurer
+        conversations = Conversations(store, client, lambda request: None, emit=emit,
+                                      structurer=Structurer.from_config(config))
         service = TelegramService(td, conversations, media_factory, call_seconds=call_seconds,
                                   max_calls=max_calls, delay=question_delay, emit=emit, allow_tasks=allow_tasks,
                                   min_call_interval=180 if continuous else 0)

@@ -12,7 +12,7 @@ from datetime import datetime
 from .config import private_directory, read_private_json
 from .control import GateError
 from .handoff import pending_requests, _pending
-from .t3 import T3Delegation, selected_context, is_coordinator_thread, settle_command_id, SETTLE_TERMINAL
+from .t3 import T3Delegation, selected_context, recent_messages, is_coordinator_thread, settle_command_id, SETTLE_TERMINAL
 from .watch import question_due
 
 
@@ -52,8 +52,9 @@ class ConversationStore:
 
 
 class Conversations:
-    def __init__(self, store, client, send, *, emit=lambda value: None):
+    def __init__(self, store, client, send, *, emit=lambda value: None, structurer=None):
         self.store, self.client, self.send, self.emit = store, client, send, emit
+        self.structurer = structurer
         self.data = store.data
         self.delegates = {}
         legacy = store.profile / 'watch-attempts.json'
@@ -69,6 +70,13 @@ class Conversations:
 
     def is_internal(self, thread):
         return is_coordinator_thread(thread)
+
+    def structure(self, prompt, coordinator):
+        """Direct structuring request; coordinator() runs the slow T3 coordination thread as fallback."""
+        if self.structurer is not None:
+            try: return self.structurer(prompt)
+            except GateError as error: self.emit({'structurer_fallback': str(error)})
+        return coordinator()
 
     SETTLE_RETRY_SECONDS = 30
     SETTLE_GIVE_UP_SECONDS = 1800
@@ -142,6 +150,7 @@ class Conversations:
         if identifier not in self.delegates:
             self.delegates[identifier] = T3Delegation.restore(self.client, operation['dialog'], emit=self.emit)
         dialog = self.delegates[identifier]
+        dialog.structurer = self.structurer
         def checkpoint():
             operation['dialog'] = dialog.state()
             operation['request_id'] = dialog.handoff.request_id
@@ -166,7 +175,7 @@ class Conversations:
                        for o in self.data['operations'].values()):
                     continue
                 if not question_due(snapshot, request_id, delay): continue
-                dialog = T3Delegation(self.client, thread['id'], request_id, emit=self.emit)
+                dialog = T3Delegation(self.client, thread['id'], request_id, emit=self.emit, structurer=self.structurer)
                 activity = _pending(snapshot, request_id)[1]
                 try:
                     asked_at = int(datetime.fromisoformat(activity['createdAt'].replace('Z', '+00:00')).timestamp())
@@ -310,7 +319,31 @@ class Conversations:
         available = self.open_operations()
         return available[0] if len(available) == 1 else None
 
-    def status_text(self, project_id=None, query=''):
+    def status_brief(self, snapshot=None):
+        """Compact call-start context for the voice session: open questions first, then recent tasks."""
+        snapshot = snapshot or self.client.snapshot
+        shell = self.client.request('/api/orchestration/shell')
+        projects = {p['id']: p for p in self.projects(shell)}
+        lines = ['Offene Rückfragen (Vorgangs-ID, Projekt, Aufgabe, Frage):']
+        operations = [o for o in self.data['operations'].values() if o['status'] in ('open', 'deferred')]
+        for operation in operations[:6]:
+            questions = ' '.join(q['question'] for q in operation['dialog']['packet']['questions'])
+            lines.append(f"- {operation['id']}, {self.project_title(operation)}, {operation['title']}: {questions[:500]}")
+        if not operations: lines.append('- keine')
+        threads = [t for t in shell.get('threads', []) if t.get('projectId') in projects
+                   and not t.get('archivedAt') and not t.get('deletedAt') and not self.is_internal(t)]
+        threads.sort(key=lambda t: (bool(t.get('hasPendingUserInput')), t.get('updatedAt', '')), reverse=True)
+        lines.append(f'Aufgabenstand, {min(8, len(threads))} von {len(threads)} aktiven Threads, offene und neueste zuerst:')
+        for thread in threads[:8]:
+            source = snapshot(thread['id'])['thread']
+            state = (source.get('latestTurn') or {}).get('state', 'unbekannt')
+            last = next((m['text'] for m in reversed(recent_messages(source)) if m['role'] == 'assistant'), '')
+            lines.append(f"- {projects[thread['projectId']].get('title')}: {source.get('title', 'Aufgabe')}: {state}. "
+                         + ' '.join(last.split())[:350])
+        return '\n'.join(lines)[:6000]
+
+    def status_text(self, project_id=None, query='', snapshot=None):
+        snapshot = snapshot or self.client.snapshot
         shell = self.client.request('/api/orchestration/shell')
         projects = {p['id']: p for p in self.projects(shell)}
         threads = [t for t in shell.get('threads', []) if t.get('projectId') in projects
@@ -322,7 +355,7 @@ class Conversations:
                                    bool(t.get('hasPendingUserInput')), t.get('updatedAt', '')), reverse=True)
         lines = [f'Ausschnitt: {min(12, len(threads))} von {len(threads)} aktiven Threads, neueste und offene zuerst.']
         for thread in threads[:12]:
-            source = self.client.snapshot(thread['id'])['thread']
+            source = snapshot(thread['id'])['thread']
             state = (source.get('latestTurn') or {}).get('state', 'unbekannt')
             lines.append(f"{projects[thread['projectId']].get('title')}: {source.get('title', 'Aufgabe')}: {state}. {selected_context(source)[:1000]}")
         return '\n'.join(lines)[:20000] or 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
@@ -331,16 +364,24 @@ class Conversations:
         shell = self.client.request('/api/orchestration/shell')
         thread = self.coordinator_source(shell)
         if thread is None: return 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
-        coordinator = self.data.get('status_coordinator')
-        if coordinator is None:
-            coordinator = self.client.create_coordinator(self.client.snapshot(thread['id'])['thread'])
-            self.data['status_coordinator'] = coordinator
-            self.store.save()
-        return self.client.run_coordinator(coordinator,
-            'Du bist Mitarbeiter des Monats. Keine Tools, Dateizugriffe oder Projektaktionen. '
+        prompt = ('Du bist Mitarbeiter des Monats. Keine Tools, Dateizugriffe oder Projektaktionen. '
             'Beantworte die Statusfrage natürlich und knapp auf Deutsch, ausschließlich anhand dieser Daten. '
-            'Nenne offene Fragen und Probleme nur, wenn sie belegt sind.\n' + json.dumps(
-                {'question': text, 'status': self.status_text(query=text)}, ensure_ascii=False))[:3500]
+            'Nenne offene Fragen und Probleme nur, wenn sie belegt sind. JSON: {"reply":"..."}.\n' + json.dumps(
+                {'question': text, 'status': self.status_text(query=text)}, ensure_ascii=False))
+        def coordinator():
+            identifier = self.data.get('status_coordinator')
+            if identifier is None:
+                identifier = self.client.create_coordinator(self.client.snapshot(thread['id'])['thread'])
+                self.data['status_coordinator'] = identifier
+                self.store.save()
+            return self.client.run_coordinator(identifier, prompt)
+        raw = self.structure(prompt, coordinator)
+        try: result = json.loads(raw)
+        except (TypeError, ValueError): return raw[:3500]  # A coordination thread may still answer in plain text.
+        reply = result.get('reply') if isinstance(result, dict) else None
+        if not isinstance(reply, str) or not reply.strip():
+            return 'Die Statusauskunft konnte ich gerade nicht verlässlich aufbereiten.'
+        return reply[:3500]
 
     def respond(self, operation, text):
         previous_request = operation['request_id']

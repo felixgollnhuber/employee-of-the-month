@@ -54,6 +54,7 @@ class WatchTests(unittest.TestCase):
                 with patch('telegram_bridge.watch.T3Client.from_profile',return_value=Client()), \
                      patch('telegram_bridge.watch.cached_database_key',return_value='fixture-key'), \
                      patch('telegram_bridge.watch.T3Delegation',return_value=SimpleNamespace(packet={},completed=False)), \
+                     patch('telegram_bridge.watch.structurer_for_profile',return_value=None), \
                      patch('telegram_bridge.watch.run_authorized_live_test',side_effect=call) as dial, \
                      patch('telegram_bridge.watch.time.monotonic',side_effect=lambda:elapsed[0]), \
                      patch('telegram_bridge.watch.time.time',side_effect=lambda:asked+elapsed[0]), \
@@ -100,6 +101,7 @@ class WatchTests(unittest.TestCase):
             delegate=SimpleNamespace(packet={'fixture':True},completed=False)
             with patch('telegram_bridge.watch.T3Client.from_profile',return_value=Client()), \
                  patch('telegram_bridge.watch.T3Delegation',return_value=delegate), \
+                 patch('telegram_bridge.watch.structurer_for_profile',return_value=None), \
                  patch('telegram_bridge.watch.run_authorized_live_test',side_effect=call) as dial, \
                  patch('telegram_bridge.watch.time.monotonic',side_effect=lambda:elapsed[0]), \
                  patch('telegram_bridge.watch.time.sleep',side_effect=sleep):

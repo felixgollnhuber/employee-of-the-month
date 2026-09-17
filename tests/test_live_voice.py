@@ -2,6 +2,7 @@ import asyncio
 import base64
 import json
 import threading
+import time
 import unittest
 
 from telegram_bridge.control import GateError
@@ -86,6 +87,51 @@ class LiveVoiceTests(unittest.TestCase):
             self.assertTrue(wants_hangup(text), text)
         for text in ('Bitte nicht auflegen.', 'Wenn ich auflegen sage, was passiert?', 'Schreib den Text: Bitte leg auf.', 'Wie kann ich auflegen?'):
             self.assertFalse(wants_hangup(text), text)
+
+    def test_each_backend_reply_reports_its_duration_without_any_transcript_text(self):
+        class Socket(FakeSocket):
+            async def send(self, text):
+                await super().send(text)
+                if json.loads(text)['type']=='session.start':
+                    await self.events.put({'type':'session.input_transcript.delta','delta':'Wie läuft der Bericht?'})
+                    await self.events.put({'type':'session.delegation.created','delegation':{'id':'item_1','target':'client'}})
+        socket = Socket(); events = []; spoken = threading.Event()
+        def delegate(transcript):
+            spoken.set()
+            return 'Der Bericht läuft.'
+        voice = self.make_voice(socket, delegate=delegate, emit=events.append)
+        voice.start()
+        self.assertTrue(spoken.wait(3))
+        deadline = time.monotonic() + 3
+        while time.monotonic() < deadline and not any('backend_reply_seconds' in e for e in events): time.sleep(.01)
+        voice.close()
+        timing = next(e for e in events if 'backend_reply_seconds' in e)
+        self.assertEqual(set(timing), {'backend_reply_seconds'})
+        self.assertGreaterEqual(timing['backend_reply_seconds'], 0)
+        self.assertTrue(any(e['type']=='session.commentary.append' for e in socket.sent))
+
+    def test_context_added_before_the_session_starts_is_part_of_session_start(self):
+        socket = FakeSocket()
+        voice = self.make_voice(socket)
+        self.assertTrue(voice.extend_instructions('\nStatus: Bericht läuft.'))
+        voice.start()
+        voice.close()
+        self.assertEqual(socket.sent[0]['session']['instructions'], 'Fixture\nStatus: Bericht läuft.')
+
+    def test_oversized_context_is_refused_without_raising_into_the_service_loop(self):
+        voice = self.make_voice(FakeSocket())
+        self.assertFalse(voice.extend_instructions('x'*50000))
+        self.assertFalse(voice.extend_instructions(None))
+        self.assertEqual(voice.instructions, 'Fixture')
+
+    def test_context_after_session_start_is_refused_and_never_interrupts_speech(self):
+        socket = FakeSocket()
+        voice = self.make_voice(socket)
+        voice.start()
+        self.assertFalse(voice.extend_instructions('\nStatus: Bericht läuft.'))
+        voice.close()
+        self.assertEqual(socket.sent[0]['session']['instructions'], 'Fixture')
+        self.assertFalse(any(e['type']=='session.instructions.append' for e in socket.sent))
 
     def test_spoken_hangup_says_goodbye_closes_live_and_signals_telegram(self):
         class Socket(FakeSocket):
