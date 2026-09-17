@@ -23,7 +23,7 @@ classifiers = [
   "Programming Language :: Python :: 3.14",
   "Topic :: Communications :: Telephony",
 ]
-dependencies = ["websockets==16.1.1"]
+dependencies = ["websockets==17.1"]
 
 [project.urls]
 Homepage = "https://github.com/felixgollnhuber/employee-of-the-month"
