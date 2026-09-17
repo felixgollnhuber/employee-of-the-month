@@ -142,7 +142,7 @@ eotm configure-live --language en
 
 - `configure` asks for the sender account's API credentials and phone number.
 - `configure-target` asks for your personal account's public `@username`.
-- `configure-live` asks for the OpenAI project API key and stores the conversation language.
+- `configure-live` asks for the OpenAI project API key and stores the conversation language. Add `--user-name Alex` if the agent should address you by name.
 
 The prompts are local and hidden where appropriate. The resulting files live outside the repository with owner-only permissions.
 
@@ -221,7 +221,7 @@ See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
 
 ## Status and limitations
 
-Employee of the Month is an **experimental personal project**. It is used every day by its author, but expect rough edges:
+Employee of the Month is an **experimental personal project** that is actively developed and used by its author. Expect rough edges:
 
 - macOS on Apple Silicon only, and the Mac has to be awake.
 - It relies on T3 Code's orchestration HTTP API. That API is not a stable public contract and may change.
@@ -248,6 +248,8 @@ Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first.
 ## Acknowledgements
 
 Built on the shoulders of [TDLib](https://github.com/tdlib/td), [tgcalls](https://github.com/TelegramMessenger/tgcalls), [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) and [WebRTC](https://webrtc.org/). They are downloaded at build time under their own licenses and are not part of this repository.
+
+See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for pinned sources and license notes.
 
 Employee of the Month is an independent project. It is not affiliated with or endorsed by Telegram, OpenAI or T3 Code.
 

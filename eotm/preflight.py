@@ -1,7 +1,7 @@
 """Report local prerequisites without authenticating or starting audio/network clients."""
 import importlib.util
 
-from .config import read_profile, read_private_json
+from .config import read_profile, read_live_config
 from .runtime import DEFAULT_RUNTIME
 from .keychain import keychain_configured
 
@@ -13,10 +13,10 @@ def offline_preflight(profile):
         target=bool(config.get('target_username'))
     except (OSError,ValueError,RuntimeError): configured=target=False
     try:
-        live_config=read_private_json(profile,'live.json')
+        live_config=read_live_config(profile)
         key=live_config.get('api_key')
         voice=live_config.get('voice','cedar')
-        api= isinstance(key,str) and key.startswith('sk-') and len(key)>30
+        api= isinstance(key,str) and key.startswith('sk-')
     except (OSError,ValueError,RuntimeError): api=False;voice='cedar'
     native=DEFAULT_RUNTIME.is_file()
     dependencies=importlib.util.find_spec('websockets') is not None

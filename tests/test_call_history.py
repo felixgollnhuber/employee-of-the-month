@@ -5,8 +5,8 @@ import tempfile
 import threading
 import unittest
 
-from telegram_bridge.call_history import CallHistory, bounded_transcript, MAX_CALLS, MAX_TRANSCRIPT_CHARS
-from telegram_bridge.service import VoiceConversation
+from eotm.call_history import CallHistory, bounded_transcript, MAX_CALLS, MAX_TRANSCRIPT_CHARS
+from eotm.service import VoiceConversation
 import test_tasks_and_daemon as task_fixtures
 
 
@@ -55,7 +55,7 @@ class HistoryTests(unittest.TestCase):
         self.assertIn('Noch nicht bestätigt', history.path.read_text())
 
     def test_api_transcripts_are_saved_without_backend_delegation(self):
-        from telegram_bridge.live_voice import LiveVoice
+        from eotm.live_voice import LiveVoice
         from test_live_voice import FakeSocket
         import time
         class Socket(FakeSocket):

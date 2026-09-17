@@ -4,7 +4,7 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from telegram_bridge.live_voice import LivePcmMedia, PcmOutputPacer, LiveVoice
+from eotm.live_voice import LivePcmMedia, PcmOutputPacer, LiveVoice
 from test_live_voice import FakeSocket
 
 
@@ -12,41 +12,43 @@ class StartupTests(unittest.TestCase):
     def make_media(self):
         native = Mock()
         voice = Mock(started=False)
-        with patch('telegram_bridge.live_voice.NativePcmMedia', return_value=native), patch('telegram_bridge.live_voice.LiveVoice', return_value=voice):
+        with patch('eotm.live_voice.NativePcmMedia', return_value=native), patch('eotm.live_voice.LiveVoice', return_value=voice):
             media = LivePcmMedia('sk-fixture', instructions='Test', authorized=True)
         return media, native, voice
 
     def test_greeting_and_wait_tone_reach_the_voice_session(self):
-        with patch('telegram_bridge.live_voice.NativePcmMedia', return_value=Mock()):
+        with patch('eotm.live_voice.NativePcmMedia', return_value=Mock()):
             media = LivePcmMedia('sk-fixture', instructions='Test', authorized=True, greeting='Begrüße Felix jetzt.', wait_tone=True)
             plain = LivePcmMedia('sk-fixture', instructions='Test', authorized=True)
         self.assertEqual((media.voice.greeting, media.voice.wait_tone), ('Begrüße Felix jetzt.', True))
         self.assertEqual((plain.voice.greeting, plain.voice.wait_tone), (None, False))
 
     def test_service_calls_ask_for_a_greeting_and_the_wait_tone_can_be_switched_off(self):
-        from telegram_bridge.application import GREETING
-        from telegram_bridge.service import build_media
+        from eotm.application import GREETING
+        from eotm.service import build_media
         delegate = Mock(operation_id=None)
         delegate.recent_context.return_value = {'previous_calls': []}
-        with patch('telegram_bridge.live_voice.LivePcmMedia') as media:
+        with patch('eotm.live_voice.LivePcmMedia') as media:
             build_media({'api_key': 'sk-fixture'}, delegate, call_seconds=1200, emit=lambda _: None, native_executable=None)
             build_media({'api_key': 'sk-fixture', 'wait_tone': False}, delegate, call_seconds=1200, emit=lambda _: None, native_executable=None)
         first, second = media.call_args_list
         self.assertEqual((first.kwargs['greeting'], first.kwargs['wait_tone']), (GREETING, True))
         self.assertIs(second.kwargs['wait_tone'], False)
-        self.assertIn('ohne auf seine erste Aussage zu warten', GREETING)
+        self.assertIn('ohne auf die erste Aussage zu warten', GREETING)
         self.assertIs(first.kwargs['delegate'], delegate)
 
     def test_single_call_runner_passes_greeting_and_wait_tone_to_the_voice(self):
         from contextlib import contextmanager
         from pathlib import Path
-        from telegram_bridge import application
+        from eotm import application
         @contextmanager
         def client(*args, **kwargs): yield Mock()
         loop = Mock(); loop.return_value.run.return_value = {'phase': 'ended'}
-        with patch('telegram_bridge.live_voice.LivePcmMedia') as media, patch.object(application, 'read_profile'), \
+        with patch('eotm.live_voice.LivePcmMedia') as media, patch.object(application, 'read_profile'), \
              patch.object(application, 'require_target', return_value='@fixture'), \
-             patch('telegram_bridge.config.read_private_json', return_value={'api_key': 'sk-fixture'}), \
+             patch('eotm.config.read_live_config', return_value={'api_key': 'sk-fixture', 'language': 'de',
+                   'voice': 'cedar', 'user_name': 'Felix', 'agent_name': 'Employee of the Month',
+                   'structuring_model': 'gpt-5.6-luna', 'wait_tone': True}), \
              patch.object(application, 'existing_authenticated_client', client), patch.object(application, 'LiveCallLoop', loop), \
              patch('importlib.util.find_spec', return_value=object()):
             application.run_authorized_live_test(Path('/unused'), Path('/unused'), authorized=True, delegate=Mock(),

@@ -10,10 +10,23 @@ class ConfigError(RuntimeError):
     pass
 
 
+APP_SUPPORT = Path.home() / "Library/Application Support"
+PROFILE_ROOT = APP_SUPPORT / "EmployeeOfTheMonth/telegram"
+LEGACY_PROFILE_ROOT = APP_SUPPORT / "CodexPhoneBridge/telegram"
+
+
 def profile_path(name="default"):
     if not re.fullmatch(r"[a-zA-Z0-9_-]{1,40}", name):
         raise ConfigError("Invalid profile name")
-    return Path.home() / "Library/Application Support/CodexPhoneBridge/telegram" / name
+    current = PROFILE_ROOT / name
+    legacy = LEGACY_PROFILE_ROOT / name
+    return legacy if legacy.exists() and not current.exists() else current
+
+
+def service_root(profile):
+    """Keep existing installations under their legacy app root; use the new root otherwise."""
+    profile = Path(profile).resolve()
+    return profile.parents[1] / "service"
 
 
 def validate(data):
@@ -114,3 +127,41 @@ def read_routing(path):
     if a == b:
         raise ConfigError("Separate input and output UIDs required")
     return {"input_uid": a, "output_uid": b}
+
+
+def validate_live_config(data, *, legacy=False):
+    if not isinstance(data, dict):
+        raise ConfigError("Invalid live configuration")
+    key = data.get("api_key")
+    if not isinstance(key, str) or not key.startswith("sk-"):
+        raise ConfigError("Invalid OpenAI key format")
+    language = data.get("language", "de" if legacy else "en")
+    if language not in ("en", "de"):
+        raise ConfigError("Language must be en or de")
+    voice = data.get("voice", "cedar")
+    if voice not in ("cedar", "marin"):
+        raise ConfigError("Unsupported GPT-Live voice")
+    result = {"api_key": key, "language": language, "voice": voice}
+    defaults = {"user_name": "Felix" if language == "de" else "the user",
+                "agent_name": "Employee of the Month"}
+    for field in ("user_name", "agent_name"):
+        value = data.get(field, defaults[field])
+        if (not isinstance(value, str) or not 1 <= len(value.strip()) <= 80
+                or any(ord(character) < 32 for character in value)):
+            raise ConfigError("Invalid conversation name")
+        result[field] = value.strip()
+    model = data.get("structuring_model", "gpt-5.6-luna")
+    if model is not None and (not isinstance(model, str)
+                              or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", model)):
+        raise ConfigError("Invalid structuring model")
+    result["structuring_model"] = model
+    wait_tone = data.get("wait_tone", True)
+    if type(wait_tone) is not bool:
+        raise ConfigError("wait_tone must be true or false")
+    result["wait_tone"] = wait_tone
+    return result
+
+
+def read_live_config(profile):
+    data = read_private_json(profile, "live.json")
+    return validate_live_config(data, legacy="language" not in data)

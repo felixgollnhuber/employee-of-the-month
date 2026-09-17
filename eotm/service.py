@@ -12,56 +12,34 @@ import time
 import uuid
 
 from .auth import existing_authenticated_client
-from .config import read_profile, require_target, read_private_json, private_directory
+from .config import read_profile, require_target, private_directory
 from .control import CallSession, GateError
 from .conversations import ConversationStore, Conversations
 from .live import RequestPump, resolve_target, QueuedMedia
 from .t3 import T3Client
 from .call_history import CallHistory
+from .i18n import Locale
 
 
-def voice_instructions(packet, recent_context):
+def voice_instructions(packet, recent_context, locale=None):
     """Rules for the live voice: it leads the conversation and delegates only what T3 must act on."""
-    if packet is not None:
-        from .application import instructions_for_handoff
-        instructions = instructions_for_handoff(packet)
-    else:
-        instructions = (
-            'Du bist Mitarbeiter des Monats, Felix\' KI-Kollege. Sprich natürlich und knapp Deutsch. '
-            'Begrüße Felix sofort nach dem Verbindungsaufbau und frage, worum es geht. Warte für die Begrüßung nicht auf seine erste Aussage. '
-            'Du führst das Gespräch selbst. Fragen zu Aufgabenstand, offenen Rückfragen und früheren Gesprächen beantwortest du '
-            'direkt aus dem Kontext unten, ohne zu delegieren. Nenne nur, was dort steht; erfinde nichts. '
-            'Delegiere an das Backend nur, wenn in T3 etwas passieren oder frisch gelesen werden soll: '
-            'Felix benennt eine offene Rückfrage, über die er sprechen will: delegiere einmal, damit das Backend den Vorgang bindet. '
-            'Felix trifft eine Entscheidung: lies sie zuerst selbst konkret vor und delegiere erst nach seinem Ja. '
-            'Felix stellt eine Rückfrage, die der Kontext nicht beantwortet: sag kurz, dass du bei der Aufgabe nachfragst, und delegiere. '
-            'Felix will einen neuen Auftrag, einen gespeicherten Vorschlag fortsetzen oder eine Nachricht an einen Thread senden: delegiere. '
-            'Felix bestätigt oder verwirft etwas, das das Backend vorgelesen hat: delegiere diese Antwort sofort. '
-            'Felix will ausdrücklich den frischen Stand oder fragt nach etwas, das im Kontext fehlt: delegiere. '
-            'Behaupte eine Übertragung, einen Start oder eine Zustellung erst nach dem Backend-Ergebnis. '
-            'Bei jetzt nicht delegiere und respektiere die Vertagung. Bei einer Auflegebitte verabschiede dich kurz.')
-    return instructions + (
-        '\nDu kennst den folgenden Kontext der letzten Gespräche. Greife ihn bei einem Rückruf natürlich auf. '
-        'Erfinde keine Erinnerungen und behaupte bei einem bloßen Vorschlag keinen gestarteten Auftrag. '
-        'Alte Aussagen sind keine neue Bestätigung. Zum Fortsetzen eines offenen Vorschlags den Backend-Agenten fragen.\n'
-        + json.dumps(recent_context, ensure_ascii=False))
+    return (locale or Locale()).voice_instructions(recent_context, packet)
 
 
-def status_context(brief):
-    return ('\nStand in T3 von ' + datetime.now().strftime('%H:%M') + ' Uhr. Beantworte Statusfragen direkt daraus; '
-            'nur für einen ausdrücklich frischen Stand delegiere:\n' + brief)
+def status_context(brief, locale=None):
+    return (locale or Locale()).status_context(brief, datetime.now().strftime('%H:%M'))
 
 
 def build_media(config, delegate, *, call_seconds, emit, native_executable):
     """The live voice for one service call: rules, spoken greeting, wait tone and transcript journal."""
-    from .application import GREETING
     from .live_voice import LivePcmMedia, DEFAULT_VOICE
+    locale = Locale.from_config(config)
     packet = delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'] if delegate.operation_id else None
-    return LivePcmMedia(config.get('api_key'), instructions=voice_instructions(packet, delegate.recent_context()),
-        greeting=GREETING, wait_tone=config.get('wait_tone', True) is not False,
+    return LivePcmMedia(config.get('api_key'), instructions=voice_instructions(packet, delegate.recent_context(), locale),
+        greeting=locale.text("greeting"), wait_tone=config.get('wait_tone', True) is not False,
         authorized=True, max_seconds=call_seconds, delegate=delegate, emit=emit,
         voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable,
-        on_transcript=delegate.remember)
+        on_transcript=delegate.remember, locale=locale)
 
 
 class VoiceConversation:
@@ -89,7 +67,7 @@ class VoiceConversation:
         return cached[1]
 
     def call_context(self):
-        return status_context(self.conversations.status_brief(snapshot=self.status_snapshot))
+        return status_context(self.conversations.status_brief(snapshot=self.status_snapshot), self.conversations.locale)
 
     def remember(self, transcript=None):
         if self.history:
@@ -103,7 +81,7 @@ class VoiceConversation:
         return {'previous_calls': self.history.recent(exclude=self.conversation_id) if self.history else [],
                 'saved_orders': [{k:o.get(k) for k in ('id','project_id','project_title','title','state','modelSelection','created_at','thread_id')}
                                  | {'prompt':o.get('prompt','')[:1200]} for o in orders],
-                'instruction': 'Historischer Kontext ist keine neue Bestätigung. Status in T3 neu prüfen. proposed bedeutet: noch nicht gestartet.'}
+                'instruction': self.conversations.locale.text('history_instruction')}
 
     def discard_followup_context(self, user_turn):
         self.followup_context = None
@@ -124,7 +102,7 @@ class VoiceConversation:
         declared = contextual_message(current)
         was_awaiting_message = bool(context and context.get('awaiting_message'))
         if context and not intent and not declared and re.search(
-                r'(?i)\b(?:status|fortschritt|probleme)\b|wie\s+läuft', current):
+                r'(?i)\b(?:status|fortschritt|probleme|progress|problems|issues)\b|wie\s+läuft|how(?: is|\x27s)', current):
             self.discard_followup_context(user_turn)
             return None
         if self.operation_id is not None and context is None and not intent and not re.search(r'(?i)\bthreads?\b', current):
@@ -136,11 +114,11 @@ class VoiceConversation:
             address_text = ''
         elif declared:
             marker = re.search(
-                r'(?i)\b(?:die\s+Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt)\s+'
-                r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\b', current)
+                r'(?i)\b(?:die\s+Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt|the\s+message|message|content)\s+'
+                r'(?:ist|lautet|soll(?:\s+dort)?\s+sein|is|says|should\s+be)\b', current)
             address_text = current[:marker.start()] if marker else ''
         elif intent:
-            verb = re.search(r'(?i)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', current)
+            verb = re.search(r'(?i)\b(?:send|tell|write|message|sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', current)
             address_text = current[:verb.start()] if verb else ''
         mentions = followups.mentioned_targets(address_text) if address_text.strip() else []
         selected_now = bool(mentions)
@@ -154,12 +132,12 @@ class VoiceConversation:
                 previous_address = previous
                 if previous_intent:
                     previous_verb = re.search(
-                        r'(?i)\b(?:sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', previous)
+                        r'(?i)\b(?:send|tell|write|message|sende|schicke|schick|sag|sage|schreib|schreibe|übermittle)\b', previous)
                     previous_address = previous[:previous_verb.start()] if previous_verb else ''
                 elif previous_declared:
                     previous_marker = re.search(
-                        r'(?i)\b(?:die\s+Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt)\s+'
-                        r'(?:ist|lautet|soll(?:\s+dort)?\s+sein)\b', previous)
+                        r'(?i)\b(?:die\s+Nachricht|der\s+Text|Text|der\s+Inhalt|Inhalt|the\s+message|message|content)\s+'
+                        r'(?:ist|lautet|soll(?:\s+dort)?\s+sein|is|says|should\s+be)\b', previous)
                     previous_address = previous[:previous_marker.start()] if previous_marker else ''
                 mentions = followups.mentioned_targets(previous_address) if previous_address.strip() else []
                 if mentions:
@@ -179,7 +157,7 @@ class VoiceConversation:
         declared = declared if context else None
         if context and context.get('awaiting_message') and not intent and not confirmed and not declared:
             if not current.rstrip().endswith('?') and not re.match(
-                    r'(?i)\s*(?:wer|wie|was|warum|weshalb|welch|wo|wann)\b', current):
+                    r'(?i)\s*(?:wer|wie|was|warum|weshalb|welch|wo|wann|who|how|what|why|which|where|when)\b', current):
                 message = current.strip()
                 intent = bool(message)
         if context and message:
@@ -196,8 +174,8 @@ class VoiceConversation:
             elif not intent and not confirmed:
                 if len(context['targets']) != 1:
                     return followups.ambiguous_reply(context['targets'])
-                return (f'Ich habe „{declared[:240]}“ als Nachricht für den T3-Thread '
-                        f'„{context["targets"][0].get("title")}“ verstanden. Sag einfach „mach das“, wenn ich sie senden soll.')
+                return self.conversations.locale.text('followup_readback', message=declared[:240],
+                    title=context["targets"][0].get("title"))
 
         if not intent and not (confirmed and context):
             if context and not selected_now:
@@ -208,7 +186,7 @@ class VoiceConversation:
                 'target_ids': [], 'targets': [], 'text': message, 'turn': user_turn,
                 'awaiting_message': False, 'awaiting_target': True,
             }
-            return 'Welchen T3-Thread meinst du? Nenne bitte den vollständigen Titel oder die Thread-ID.'
+            return self.conversations.locale.text('ask_thread')
         if len(context['targets']) != 1:
             context['awaiting_target'] = True
             context['turn'] = user_turn
@@ -217,7 +195,7 @@ class VoiceConversation:
         if not message:
             context['awaiting_message'] = True
             context['turn'] = user_turn
-            return f'Welche Nachricht soll ich an den T3-Thread „{context["targets"][0].get("title")}“ senden?'
+            return self.conversations.locale.text('ask_message', title=context["targets"][0].get("title"))
 
         expected = self.revision() if revision is None else revision
         target = context['targets'][0]
@@ -232,24 +210,24 @@ class VoiceConversation:
         except GateError as error:
             self.conversations.emit({'voice_backend_gate': str(error)})
             if str(error) == 'selected_account_exhausted':
-                return 'Das vorgeschlagene Account-Limit ist inzwischen ausgeschöpft. Bitte lass uns einen anderen Account oder ein anderes Modell wählen.'
-            return 'Die Aktion konnte ich gerade nicht verlässlich bestätigen. Ich behaupte keinen erfolgreichen Start. Bitte konkretisiere den Auftrag oder versuche die Statusabfrage erneut.'
+                return self.conversations.locale.text('quota_exhausted')
+            return self.conversations.locale.text('unconfirmed_action')
         finally: self.remember()
 
     def _respond(self, transcript, *, revision=None):
         with self.lock:
-            if self.cancelled(): return 'Das Gespräch ist beendet.'
             c = self.conversations
+            if self.cancelled(): return c.locale.text('call_ended')
             from .tasks import last_user
             if not last_user(transcript).strip():
-                return 'Begrüße Felix mit dem bekannten Gesprächskontext und frage kurz, woran er anknüpfen möchte. Frühere Zusagen sind keine neue Bestätigung.'
+                return c.locale.text('greet_with_context')
             from .followups import Followups, parse_followup
             from .tasks import explicit_confirmation
             current = last_user(transcript)
             # Route explicit addressed messages before an attached Ask or proposal.
             # Any intervening intent invalidates the conversational confirmation slot.
             if (self.proposal_id and not explicit_confirmation(current)
-                    and current.strip().casefold().rstrip('.!') not in ('nein', 'abbrechen', 'doch nicht')):
+                    and current.strip().casefold().rstrip('.!') not in ('nein', 'abbrechen', 'doch nicht', 'no', 'cancel', 'never mind')):
                 self.proposal_id = None
             followups = Followups(c)
             parsed_followup = parse_followup(current)
@@ -265,10 +243,10 @@ class VoiceConversation:
                         'awaiting_message': len(mentions) == 1, 'awaiting_target': len(mentions) != 1,
                     }
                     if len(mentions) == 1:
-                        return f'Welche Nachricht soll ich an den T3-Thread „{mentions[0].get("title")}“ senden?'
+                        return c.locale.text('ask_message', title=mentions[0].get('title'))
                     if len(mentions) > 1:
                         return followups.ambiguous_reply(mentions)
-                    return 'Welchen T3-Thread meinst du, und welche Nachricht soll ich dorthin senden?'
+                    return c.locale.text('ask_thread_and_message')
                 matches = followups.matching_targets(parsed_followup['target'])
                 if len(matches) > 1:
                     self.followup_context = {
@@ -296,11 +274,11 @@ class VoiceConversation:
                     expected = self.revision() if revision is None else revision
                     return self.launcher.confirm(self.proposal_id, transcript, revision=expected,
                         cancelled=lambda: self.cancelled() or self.revision() != expected)
-                if last_user(transcript).strip().casefold().rstrip('.!') in ('nein', 'abbrechen', 'doch nicht'):
+                if last_user(transcript).strip().casefold().rstrip('.!') in ('nein', 'abbrechen', 'doch nicht', 'no', 'cancel', 'never mind'):
                     self.launcher.jobs[self.proposal_id]['state'] = 'cancelled'
                     c.store.save()
                     self.proposal_id = None
-                    return 'Alles klar, ich starte keinen neuen Auftrag.'
+                    return c.locale.text('task_cancelled')
             if self.operation_id is None:
                 c.discover(0)
             available = c.open_operations()
@@ -309,7 +287,7 @@ class VoiceConversation:
             if self.operation_id is not None:
                 operation = c.data['operations'][self.operation_id]
                 if not c.refresh(operation):
-                    return 'Diese Rückfrage ist inzwischen erledigt. Es wurde keine weitere Antwort übertragen.'
+                    return c.locale.text('question_resolved')
                 dialog = c.delegate(operation)
                 dialog.cancelled, dialog.revision = self.cancelled, self.revision
                 dialog.deferred = False
@@ -332,40 +310,16 @@ class VoiceConversation:
             shell = c.client.request('/api/orchestration/shell')
             source = c.coordinator_source(shell)
             if source is None: return status
-            task_instructions = ''
             task_data = {}
             if self.launcher:
-                task_instructions = (
-                    'Du kannst einen neuen Feature-Auftrag vorschlagen, niemals selbst ausführen. '
-                    'Nur wenn der Nutzer einen neuen Auftrag wünscht: ergänze new_task mit project_id, title, prompt, '
-                    'request_quote (wörtlich aus der letzten Nutzeraussage), complexity (simple/medium/complex), reason und '
-                    'modelSelection={instanceId,model,options:[{id,value}]}. '
-                    'Wähle nur existierende Projekte und aktuell angebotene Provider-Instanzen, Modelle und Optionen. '
-                    'Bei unklarem Projekt oder Auftrag frage nach und liefere new_task=null. '
-                    'Empfiehl Modell und Reasoning anhand der Komplexität: einfache Änderungen low/medium, '
-                    'übliche Features medium/high, schwierige Architektur high/xhigh. Höhere Stufen nur begründet. '
-                    'Berücksichtige alle Accounts und deren frische Limits. Erschöpfte Accounts sind ausgeschlossen. '
-                    'Gleiche account_group bedeutet gemeinsam genutzte Kapazität, keine Addition. '
-                    'Unbekannte Limits sind unbekannt, Prozentwerte sind keine Tokenbudgets. '
-                    'Bevorzuge bei gleicher Eignung mehr verbleibende Kapazität und Standard-Service-Tier. '
-                    'Eine explizite Nutzerwahl von Modell oder Account geht vor, solange verfügbar. '
-                    'Die Anwendung liest den vollständigen Vorschlag vor und wartet auf ein neues Ja. '
-                    'Antworte bei Auftragsvorschlägen mit operation_id=null. ')
-                task_instructions += (
-                    'Die vorherigen Gespräche und gespeicherten Aufträge sind Kontext. Beziehe dich bei Rückrufen darauf. '
-                    'Wenn Felix einen gespeicherten unbestätigten Auftrag fortsetzen möchte, gib resume_proposal_id '
-                    'mit dessen ID zurück, new_task=null und operation_id=null. Bei mehreren möglichen Aufträgen frage nach. '
-                    'Erzeuge dafür keinen doppelten Vorschlag. Alte Bestätigungen dürfen nicht erneut verwendet werden. ')
                 task_data = {'projects': [{'id': p['id'], 'title': p['title']} for p in c.projects()],
                              'providers': self.launcher.advisor.options(max_age=600),
                              'pending_proposal': self.launcher.jobs.get(self.proposal_id)}
-            prompt = (task_instructions + 'Du bist Mitarbeiter des Monats. Beantworte die Statusfrage kurz auf Deutsch anhand der Daten. '
-                      'Keine Tools oder Projektaktionen. Bei mehreren offenen Vorgängen erst kurz nachfragen. '
-                      'Wähle operation_id nur, wenn die letzte Nutzeraussage den Vorgang eindeutig benennt. '
-                      'Eine Auswahl ist keine fachliche Antwort. JSON: {"reply":"...", "operation_id":null}.\n'
-                      + json.dumps({'status': status, 'operations': [{'id': o['id'], 'title': o['title'],
-                                      'project': c.project_title(o), 'questions': o['dialog']['packet']['questions']} for o in available], **task_data,
-                                    'recent_call_context': self.recent_context(), 'transcript': transcript}, ensure_ascii=False))
+            payload = {'status': status, 'operations': [{'id': o['id'], 'title': o['title'],
+                       'project': c.project_title(o), 'questions': o['dialog']['packet']['questions']}
+                       for o in available], **task_data, 'recent_call_context': self.recent_context(),
+                       'transcript': transcript}
+            prompt = c.locale.status_structuring_prompt(payload, allow_tasks=self.launcher is not None)
             def coordinator():
                 if self.coordinator_id is None:
                     template = c.client.snapshot(source['id'])['thread']
@@ -374,9 +328,9 @@ class VoiceConversation:
                 return c.client.run_coordinator(self.coordinator_id, prompt, cancelled=self.cancelled)
             raw = c.structure(prompt, coordinator)
             try: result = json.loads(raw)
-            except (TypeError, ValueError): return 'Die Statusauskunft konnte ich gerade nicht verlässlich aufbereiten.'
-            if not isinstance(result, dict) or not isinstance(result.get('reply'), str): return 'Bitte konkretisiere deine Frage.'
-            if self.cancelled() or (revision is not None and self.revision() != revision): return 'Bitte wiederhole deine aktuelle Frage.'
+            except (TypeError, ValueError): return c.locale.text('status_unavailable')
+            if not isinstance(result, dict) or not isinstance(result.get('reply'), str): return c.locale.text('clarify')
+            if self.cancelled() or (revision is not None and self.revision() != revision): return c.locale.text('repeat_current')
             resumed = result.get('resume_proposal_id')
             if self.launcher and isinstance(resumed, str):
                 self.discard_followup_context(sum(m.get('role') == 'user' for m in transcript))
@@ -440,7 +394,7 @@ class TelegramService:
         if allow_tasks:
             from .providers import ProviderAdvisor
             from .tasks import TaskLauncher
-            self.launcher = TaskLauncher(conversations, ProviderAdvisor(conversations.client))
+            self.launcher = TaskLauncher(conversations, ProviderAdvisor(conversations.client, locale=conversations.locale))
 
     def call_key(self, call_id):
         return self.session_id + ':' + str(call_id)
@@ -535,7 +489,7 @@ class TelegramService:
         """Idle only. One broken thread must never stop scanning, so nothing escapes from here."""
         if self.status_checked_at is not None and self.clock() - self.status_checked_at < 60: return
         self.status_checked_at = self.clock()
-        try: self.status_cache = (self.clock(), status_context(self.conversations.status_brief()))
+        try: self.status_cache = (self.clock(), status_context(self.conversations.status_brief(), self.conversations.locale))
         except Exception as error:
             self.status_cache = None
             self.emit({'voice_context_prefetch_failed': self.failure(error)})
@@ -693,7 +647,9 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
     client = T3Client.from_profile(profile)
     if project_id != '*' and not any(p.get('id') == project_id for p in client.request('/api/orchestration/shell').get('projects', [])):
         raise GateError('explicit_t3_project_required')
-    config = read_private_json(profile, 'live.json')
+    from .config import read_live_config
+    config = read_live_config(profile)
+    locale = Locale.from_config(config)
     def media_factory(delegate):
         return build_media(config, delegate, call_seconds=call_seconds, emit=emit, native_executable=native_executable)
     # existing_authenticated_client holds session.lock for this entire lifetime.
@@ -711,7 +667,7 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
         store = ConversationStore(profile, project_id, target.user_id, expand_scope=project_id == '*')
         from .structurer import Structurer
         conversations = Conversations(store, client, lambda request: None, emit=emit,
-                                      structurer=Structurer.from_config(config))
+                                      structurer=Structurer.from_config(config), locale=locale)
         service = TelegramService(td, conversations, media_factory, call_seconds=call_seconds,
                                   max_calls=max_calls, delay=question_delay, emit=emit, allow_tasks=allow_tasks,
                                   min_call_interval=180 if continuous else 0)

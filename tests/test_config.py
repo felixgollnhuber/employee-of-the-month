@@ -3,7 +3,7 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from telegram_bridge.config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing
+from eotm.config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing
 
 
 class ConfigTests(unittest.TestCase):

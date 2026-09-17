@@ -21,10 +21,10 @@ def bounded_transcript(transcript):
     for message in transcript:
         if message.get('role') not in ('user', 'assistant') or not isinstance(message.get('text'), str): continue
         text = message['text']
-        text = re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----', '[Schlüssel ausgeblendet]', text)
-        text = re.sub(r'\bsk-[A-Za-z0-9_-]{20,}', '[API-Key ausgeblendet]', text)
-        text = re.sub(r'(?i)\bBearer\s+[A-Za-z0-9._~-]+', 'Bearer [ausgeblendet]', text)
-        text = re.sub(r'(?im)^([^\n]*(?:api[_ -]?key|password|passphrase|secret|access[_ -]?token)\s*[:=])[^\n]*', r'\1 [ausgeblendet]', text)
+        text = re.sub(r'-----BEGIN [^-]*PRIVATE KEY-----[\s\S]*?-----END [^-]*PRIVATE KEY-----', '[private key redacted]', text)
+        text = re.sub(r'\bsk-[A-Za-z0-9_-]{20,}', '[API key redacted]', text)
+        text = re.sub(r'(?i)\bBearer\s+[A-Za-z0-9._~-]+', 'Bearer [redacted]', text)
+        text = re.sub(r'(?im)^([^\n]*(?:api[_ -]?key|password|passphrase|secret|access[_ -]?token)\s*[:=])[^\n]*', r'\1 [redacted]', text)
         messages.append({'role': message['role'], 'text': text[:8000]})
     # Preserve the initial subject and the latest exchange; structured task state
     # separately retains actual proposals, confirmations and T3 IDs.

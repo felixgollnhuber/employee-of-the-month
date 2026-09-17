@@ -1,7 +1,7 @@
 import json
 import unittest
 
-from telegram_bridge.control import CallSession, GateError
+from eotm.control import CallSession, GateError
 
 
 class FixtureMedia:

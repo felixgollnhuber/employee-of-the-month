@@ -14,6 +14,7 @@ from .control import GateError
 from .handoff import pending_requests, _pending
 from .t3 import T3Delegation, selected_context, recent_messages, is_coordinator_thread, settle_command_id, SETTLE_TERMINAL
 from .watch import question_due
+from .i18n import Locale
 
 
 class ConversationStore:
@@ -52,9 +53,10 @@ class ConversationStore:
 
 
 class Conversations:
-    def __init__(self, store, client, send, *, emit=lambda value: None, structurer=None):
+    def __init__(self, store, client, send, *, emit=lambda value: None, structurer=None, locale=None):
         self.store, self.client, self.send, self.emit = store, client, send, emit
         self.structurer = structurer
+        self.locale = locale or Locale()
         self.data = store.data
         self.delegates = {}
         legacy = store.profile / 'watch-attempts.json'
@@ -158,6 +160,8 @@ class Conversations:
             self.delegates[identifier] = T3Delegation.restore(self.client, operation['dialog'], emit=self.emit)
         dialog = self.delegates[identifier]
         dialog.structurer = self.structurer
+        dialog.locale = self.locale
+        dialog.packet["instruction"] = self.locale.text("handoff_instruction")
         def checkpoint():
             operation['dialog'] = dialog.state()
             operation['request_id'] = dialog.handoff.request_id
@@ -295,8 +299,9 @@ class Conversations:
         if (not self.refresh(operation) or operation['status'] != 'open'
                 or operation['first_message'] is not None or operation['attempt'].get('followup_suppressed')): return
         questions = ' '.join(q['question'] for q in self.delegate(operation).packet['questions'])
-        self.queue_text(f"Ich brauche noch kurz deine Einschätzung zu {operation['title']} ({self.project_title(operation)}): {questions[:2500]}\n"
-                        f"Antworte einfach hier oder ruf zurück. Vorgang {identifier}.", operation=operation, purpose='first')
+        self.queue_text(self.locale.text("missed_question", title=operation['title'],
+                        project=self.project_title(operation), questions=questions[:2500], identifier=identifier),
+                        operation=operation, purpose='first')
 
     def delivery(self, event):
         tag = event.get('@extra', '')
@@ -331,21 +336,23 @@ class Conversations:
         snapshot = snapshot or self.client.snapshot
         shell = self.client.request('/api/orchestration/shell')
         projects = {p['id']: p for p in self.projects(shell)}
-        lines = ['Offene Rückfragen (Vorgangs-ID, Projekt, Aufgabe, Frage):']
+        lines = [self.locale.text('open_questions_header')]
         operations = [o for o in self.data['operations'].values() if o['status'] in ('open', 'deferred')]
         for operation in operations[:6]:
             questions = ' '.join(q['question'] for q in operation['dialog']['packet']['questions'])
             lines.append(f"- {operation['id']}, {self.project_title(operation)}, {operation['title']}: {questions[:500]}")
-        if not operations: lines.append('- keine')
+        if not operations: lines.append('- ' + self.locale.text('none'))
         threads = [t for t in shell.get('threads', []) if t.get('projectId') in projects
                    and not t.get('archivedAt') and not t.get('deletedAt') and not self.is_internal(t)]
         threads.sort(key=lambda t: (bool(t.get('hasPendingUserInput')), t.get('updatedAt', '')), reverse=True)
-        lines.append(f'Aufgabenstand, {min(8, len(threads))} von {len(threads)} aktiven Threads, offene und neueste zuerst:')
+        lines.append(self.locale.text('task_status_header', shown=min(8, len(threads)), total=len(threads)))
+        unknown = 'unknown' if self.locale.language == 'en' else 'unbekannt'
+        task = 'Task' if self.locale.language == 'en' else 'Aufgabe'
         for thread in threads[:8]:
             source = snapshot(thread['id'])['thread']
-            state = (source.get('latestTurn') or {}).get('state', 'unbekannt')
+            state = (source.get('latestTurn') or {}).get('state', unknown)
             last = next((m['text'] for m in reversed(recent_messages(source)) if m['role'] == 'assistant'), '')
-            lines.append(f"- {projects[thread['projectId']].get('title')}: {source.get('title', 'Aufgabe')}: {state}. "
+            lines.append(f"- {projects[thread['projectId']].get('title')}: {source.get('title', task)}: {state}. "
                          + ' '.join(last.split())[:350])
         return '\n'.join(lines)[:6000]
 
@@ -357,23 +364,24 @@ class Conversations:
                    and (project_id is None or t['projectId'] == project_id)
                    and not t.get('archivedAt') and not t.get('deletedAt') and not self.is_internal(t)]
         words = {w for w in re.findall(r'\w+', query.casefold()) if len(w) >= 4 and w not in {
-            'status','steht','läuft','meine','meinen','meinem','bitte','fortschritt','projekt','thread','aufgabe'}}
+            'status','steht','läuft','meine','meinen','meinem','bitte','fortschritt','projekt','thread','aufgabe',
+            'state','progress','please','project','task','problems','issues','about','with','what'}}
         threads.sort(key=lambda t: (sum(w in t.get('title','').casefold() for w in words),
                                    bool(t.get('hasPendingUserInput')), t.get('updatedAt', '')), reverse=True)
-        lines = [f'Ausschnitt: {min(12, len(threads))} von {len(threads)} aktiven Threads, neueste und offene zuerst.']
+        lines = [self.locale.text('status_excerpt', shown=min(12, len(threads)), total=len(threads))]
+        unknown = 'unknown' if self.locale.language == 'en' else 'unbekannt'
+        task = 'Task' if self.locale.language == 'en' else 'Aufgabe'
         for thread in threads[:12]:
             source = snapshot(thread['id'])['thread']
-            state = (source.get('latestTurn') or {}).get('state', 'unbekannt')
-            lines.append(f"{projects[thread['projectId']].get('title')}: {source.get('title', 'Aufgabe')}: {state}. {selected_context(source)[:1000]}")
-        return '\n'.join(lines)[:20000] or 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
+            state = (source.get('latestTurn') or {}).get('state', unknown)
+            lines.append(f"{projects[thread['projectId']].get('title')}: {source.get('title', task)}: {state}. {selected_context(source)[:1000]}")
+        return '\n'.join(lines)[:20000] or self.locale.text('no_active_tasks')
 
     def status_reply(self, text):
         shell = self.client.request('/api/orchestration/shell')
         thread = self.coordinator_source(shell)
-        if thread is None: return 'Für dieses Projekt sind keine aktiven Aufgaben vorhanden.'
-        prompt = ('Du bist Mitarbeiter des Monats. Keine Tools, Dateizugriffe oder Projektaktionen. '
-            'Beantworte die Statusfrage natürlich und knapp auf Deutsch, ausschließlich anhand dieser Daten. '
-            'Nenne offene Fragen und Probleme nur, wenn sie belegt sind. JSON: {"reply":"..."}.\n' + json.dumps(
+        if thread is None: return self.locale.text('no_active_tasks')
+        prompt = self.locale.text('status_reply_prompt', payload=json.dumps(
                 {'question': text, 'status': self.status_text(query=text)}, ensure_ascii=False))
         def coordinator():
             identifier = self.data.get('status_coordinator')
@@ -387,24 +395,25 @@ class Conversations:
         except (TypeError, ValueError): return raw[:3500]  # A coordination thread may still answer in plain text.
         reply = result.get('reply') if isinstance(result, dict) else None
         if not isinstance(reply, str) or not reply.strip():
-            return 'Die Statusauskunft konnte ich gerade nicht verlässlich aufbereiten.'
+            return self.locale.text('status_unavailable')
         return reply[:3500]
 
     def respond(self, operation, text):
         previous_request = operation['request_id']
         if not self.refresh(operation) and operation['status'] == 'stale':
-            return 'Diese Rückfrage ist inzwischen in T3 erledigt oder veraltet. Ich habe nichts übertragen.'
+            return self.locale.text('question_stale')
         dialog = self.delegate(operation)
         if previous_request != operation['request_id']:
-            return 'Inzwischen gibt es eine neue Rückfrage: ' + ' '.join(q['question'] for q in dialog.packet['questions'])[:2500]
-        if text.strip().casefold().rstrip('.!') in ('jetzt nicht', 'später', 'nicht jetzt', 'bitte später'):
+            return self.locale.text('new_question', questions=' '.join(q['question'] for q in dialog.packet['questions'])[:2500])
+        if text.strip().casefold().rstrip('.!') in ('jetzt nicht', 'später', 'nicht jetzt', 'bitte später',
+                                                    'not now', 'later', 'please later'):
             dialog.deferred = True
             operation['status'] = 'deferred'
             dialog.checkpoint()
-            return 'Alles klar, ich warte. Melde dich hier oder ruf zurück, sobald es passt. Ich fasse nicht automatisch nach.'
+            return self.locale.text('deferred')
         if operation['status'] == 'completed':
             if pending_requests(self.client.snapshot(operation['thread_id'])):
-                return 'Inzwischen gibt es eine neue offene Rückfrage. Bitte antworte auf deren Nachricht oder nenne die neue Vorgangs-ID. Diese Korrektur habe ich nicht übertragen.'
+                return self.locale.text('new_open_question')
             # An explicitly linked late correction is a new source turn, never a replay of the old Ask.
             dialog.completed = False
         operation['status'] = 'open'
@@ -417,7 +426,7 @@ class Conversations:
         try: result = dialog(operation['transcript'])
         finally: dialog.channel = 'voice'
         if dialog.completed:
-            result = 'Alles klar, damit habe ich alles. Deine Antwort ist in T3 angekommen. Ich mache weiter.'
+            result = self.locale.text('answer_received')
             operation['status'] = 'completed'
         elif dialog.deferred: operation['status'] = 'deferred'
         operation['transcript'].append({'role': 'assistant', 'text': result})
@@ -454,12 +463,12 @@ class Conversations:
             self.data['updates'][key] = 'stale'
             self.store.save()
             return
-        if re.search(r'(?i)\b(status|fortschritt|probleme)\b|wie läuft', text) and not reply_id:
+        if re.search(r'(?i)\b(status|fortschritt|probleme|progress|problems|issues)\b|wie läuft|how(?: is|\x27s)', text) and not reply_id:
             operation = None
             answer = self.status_reply(text)
         elif operation and linked_request and linked_request != operation['request_id']:
-            answer = 'Die Nachricht gehört zu einer früheren Rückfrage. Aktuell offen: ' + ' '.join(
-                q['question'] for q in self.delegate(operation).packet['questions'])[:2500]
+            answer = self.locale.text('older_question', questions=' '.join(
+                q['question'] for q in self.delegate(operation).packet['questions'])[:2500])
         elif operation:
             if operation['attempt']:
                 operation['attempt']['followup_suppressed'] = True
@@ -467,8 +476,8 @@ class Conversations:
             answer = self.respond(operation, text)
         else:
             available = self.open_operations()
-            answer = ('Welchen Vorgang meinst du? Bitte nenne die Vorgangs-ID oder antworte auf die passende Nachricht.\n'
-                      + '\n'.join(f"{o['id']}: {o['title']}" for o in available)) if available else self.status_reply(text)
+            answer = self.locale.text('ask_operation', choices='\n'.join(
+                f"{o['id']}: {o['title']}" for o in available)) if available else self.status_reply(text)
         self.queue_text(answer, operation=operation, reply_to=message['id'])
         self.data['updates'][key] = 'handled'
         self.store.save()

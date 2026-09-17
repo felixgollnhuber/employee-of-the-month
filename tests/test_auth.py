@@ -1,7 +1,7 @@
 from pathlib import Path
 import unittest
 
-from telegram_bridge.auth import AuthGate, auth_request
+from eotm.auth import AuthGate, auth_request
 
 
 class AuthTests(unittest.TestCase):

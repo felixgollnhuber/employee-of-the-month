@@ -2,8 +2,8 @@ import copy
 import json
 import unittest
 
-from telegram_bridge.control import GateError
-from telegram_bridge.handoff import prepare_handoff, prepare_answer
+from eotm.control import GateError
+from eotm.handoff import prepare_handoff, prepare_answer
 
 
 def snapshot():

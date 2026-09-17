@@ -19,7 +19,7 @@ cd employee-of-the-month
 make check
 ```
 
-`make check` builds two small Swift helpers, generates a test tone and runs the full unit test suite. It needs no network access and no credentials.
+`make check` builds a small Swift test helper, generates a test tone and runs the full unit test suite. It needs no network access and no credentials.
 
 Building the Telegram runtime (`make telegram-runtime`) is only needed to work on the native media code or to place real calls. See [docs/getting-started.md](docs/getting-started.md).
 

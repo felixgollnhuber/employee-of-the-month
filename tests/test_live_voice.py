@@ -5,8 +5,8 @@ import threading
 import time
 import unittest
 
-from telegram_bridge.control import GateError
-from telegram_bridge.live_voice import LiveVoice, decode_audio, session_start, wants_hangup, mentions_hangup, is_farewell
+from eotm.control import GateError
+from eotm.live_voice import LiveVoice, decode_audio, session_start, wants_hangup, mentions_hangup, is_farewell
 
 
 class FakeSocket:
@@ -289,7 +289,7 @@ class LiveVoiceTests(unittest.TestCase):
         return socket
 
     def run_delegation(self, echo=False, **options):
-        from telegram_bridge.live_voice import WAIT_TONE
+        from eotm.live_voice import WAIT_TONE
         heard = []
         def audio_out(data):
             time.sleep(len(data)/32000)
@@ -329,7 +329,7 @@ class LiveVoiceTests(unittest.TestCase):
 
     def test_wait_tone_is_a_short_quiet_click_free_pcm_signal(self):
         import array
-        from telegram_bridge.live_voice import WAIT_TONE
+        from eotm.live_voice import WAIT_TONE
         samples = array.array('h'); samples.frombytes(WAIT_TONE)
         self.assertEqual(len(WAIT_TONE) % 2, 0)
         self.assertLessEqual(len(samples), 16000*0.4)

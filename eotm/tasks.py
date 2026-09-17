@@ -16,8 +16,9 @@ def last_user(transcript):
 def explicit_confirmation(text):
     normalized = re.sub(r'[.,!?]', ' ', text.casefold())
     normalized = ' '.join(normalized.split())
-    action = r'(?:starte|leg los|mach(?: das| es)?(?: bitte)?)'
-    return bool(re.fullmatch(r'(?:ja|genau|richtig|passt|' + action + r')(?: (?:bitte|genau|richtig|passt|' + action + r'|so|das))*', normalized))
+    action = r'(?:starte|leg los|mach(?: das| es)?(?: bitte)?|start|go ahead|do it)'
+    return bool(re.fullmatch(r'(?:ja|yes|genau|exactly|richtig|correct|passt|sounds good|' + action
+        + r')(?: (?:bitte|please|yes|genau|exactly|richtig|correct|passt|sounds good|' + action + r'|so|das))*', normalized))
 
 
 class TaskLauncher:
@@ -51,9 +52,10 @@ class TaskLauncher:
         return proposal, self.proposal_text(proposal)
 
     def proposal_text(self, proposal):
-        return (f"Ich schlage vor: {proposal['project_title'][:80]}, {proposal['title']}. "
-            f"Auftrag: {proposal['prompt'][:350]} " + self.advisor.describe(proposal['modelSelection']) +
-            f" Grund: {proposal['reason'].split('. ', 1)[0][:180]}. Soll ich diesen Auftrag jetzt in einem neuen T3-Thread starten?")
+        return self.c.locale.text('task_proposal', project=proposal['project_title'][:80],
+            title=proposal['title'], prompt=proposal['prompt'][:350],
+            selection=self.advisor.describe(proposal['modelSelection']),
+            reason=proposal['reason'].split('. ', 1)[0][:180])
 
     def resume_proposal(self, identifier, transcript, *, conversation_id, revision):
         proposal = self.jobs.get(identifier)
@@ -72,7 +74,7 @@ class TaskLauncher:
         if job['state'] == 'started': return self.started_reply(job)
         if job['state'] != 'proposed':
             self.reconcile(job)
-            return self.started_reply(job) if job['state'] == 'started' else 'Der Start ist noch unbestätigt. Ich lege keinen zweiten Thread an.'
+            return self.started_reply(job) if job['state'] == 'started' else self.c.locale.text('task_start_unconfirmed')
         if cancelled() or revision <= job['revision'] or last_user(transcript) == job['proposal_user_text']:
             raise GateError('fresh_task_confirmation_required')
         if not explicit_confirmation(last_user(transcript)): raise GateError('explicit_task_confirmation_required')
@@ -90,11 +92,7 @@ class TaskLauncher:
             'modelSelection': job['modelSelection'], 'runtimeMode': 'full-access', 'interactionMode': 'default',
             'branch': None, 'worktreePath': None, 'createdAt': timestamp}
         job['message_id'] = str(uuid.uuid5(uuid.NAMESPACE_URL, 'voice-task-'+identifier))
-        prompt = ('Der Nutzer hat diesen Auftrag im Sprachgespräch ausdrücklich bestätigt. Setze ihn um und prüfe das Ergebnis. '
-                  'Lies zuerst die geltenden AGENTS.md und Projektregeln. Bewahre bestehende Änderungen; verwende für Codeänderungen '
-                  'einen isolierten Git-Worktree, soweit die Projektregeln dies vorsehen oder parallele Arbeit sonst kollidiert. '
-                  'Keine zusätzlichen Produktivaktionen, Veröffentlichungen oder Nachrichten ohne entsprechende Beauftragung. '
-                  'Stelle notwendige Rückfragen über die normalen T3-Rückfragen.\n\nAuftrag:\n' + job['prompt'])
+        prompt = self.c.locale.task_thread_prompt(job['prompt'])
         job['start_command'] = {'type': 'thread.turn.start', 'commandId': 'voice-start-'+identifier,
             'threadId': job['thread_id'], 'message': {'messageId': job['message_id'], 'role': 'user', 'text': prompt, 'attachments': []},
             'runtimeMode': 'full-access', 'interactionMode': 'default', 'createdAt': timestamp}
@@ -107,7 +105,7 @@ class TaskLauncher:
             self._start(job)
         except GateError:
             self.reconcile(job)
-        return self.started_reply(job) if job['state'] == 'started' else 'Der Thread-Start ist noch nicht bestätigt. Ich prüfe denselben Vorgang und lege keinen zweiten an.'
+        return self.started_reply(job) if job['state'] == 'started' else self.c.locale.text('task_start_unconfirmed')
 
     def _start(self, job):
         job['state'] = 'starting'
@@ -142,4 +140,4 @@ class TaskLauncher:
                 self.c.queue_text(self.started_reply(job), purpose='task_started')
 
     def started_reply(self, job):
-        return f"Der neue T3-Thread „{job['title']}“ im Projekt {job['project_title']} hat deinen Auftrag erhalten und ist gestartet."
+        return self.c.locale.text('task_started', title=job['title'], project=job['project_title'])

@@ -18,8 +18,10 @@ After `make live-deps` and activation of `.build/live-venv`, use the `eotm` comm
 | `eotm configure` | Store Telegram API credentials and the sender phone number with hidden local input. |
 | `eotm configure-target` | Store the personal recipient's public Telegram username. |
 | `eotm configure-live` | Store the OpenAI key and conversation preferences. |
+| `eotm configure-t3` | Store a validated T3 origin and private credentials-file reference without contacting T3. |
 | `eotm configure-audio` | Configure the legacy desktop-audio path. No audio starts. |
 | `eotm remember-login` | Verify the existing TDLib database and store its derived key in macOS Keychain. |
+| `eotm install-service` | Stage a fixed private release and LaunchAgent plist without starting it. |
 
 ## Explicit runtime commands
 

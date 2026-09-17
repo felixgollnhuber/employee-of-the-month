@@ -7,11 +7,11 @@ from unittest.mock import Mock, patch
 from pathlib import Path
 import json
 
-from telegram_bridge.conversations import ConversationStore, Conversations
-from telegram_bridge.control import GateError, CallSession
-from telegram_bridge.descriptor import normalize_pcm_ready
-from telegram_bridge.service import TelegramService, VoiceConversation, run_service, watcher_lease
-from telegram_bridge.live import RequestPump
+from eotm.conversations import ConversationStore, Conversations
+from eotm.control import GateError, CallSession
+from eotm.descriptor import normalize_pcm_ready
+from eotm.service import TelegramService, VoiceConversation, run_service, watcher_lease
+from eotm.live import RequestPump
 from test_control import FixtureMedia
 from test_descriptor import fixture_ready
 from test_t3_dialog import DialogClient, reply
@@ -25,7 +25,7 @@ class Client(DialogClient):
 
 class ConversationFixture:
     def setUp(self):
-        clock_patch = patch('telegram_bridge.conversations.time.time', return_value=1790000000)
+        clock_patch = patch('eotm.conversations.time.time', return_value=1790000000)
         clock_patch.start()
         self.addCleanup(clock_patch.stop)
         self.temp = tempfile.TemporaryDirectory()
@@ -328,7 +328,7 @@ class ServiceTests(ConversationFixture, unittest.TestCase):
         self.assertEqual(voice.operation_id, self.identifier)
         voice([{'role': 'user', 'text': 'Ja PDF'}])
         self.assertTrue(self.c.delegate(self.operation).completed)
-        self.assertIn('jetzt nicht', self.client.prompts[-1])
+        self.assertIn('action=defer', self.client.prompts[-1])
         self.client.responses = ['{"reply":"Der Bericht ist fertig.","operation_id":null}']
         fresh = VoiceConversation(self.c, self.s.lock)
         self.assertIn('fertig', fresh([{'role': 'user', 'text': 'Wie läuft es?'}]))
@@ -480,14 +480,14 @@ class ServiceTests(ConversationFixture, unittest.TestCase):
         self.assertEqual(len(fetched), first)
 
     def test_voice_rules_answer_from_context_and_delegate_only_actions(self):
-        from telegram_bridge.service import voice_instructions
-        from telegram_bridge.application import instructions_for_handoff
+        from eotm.service import voice_instructions
+        from eotm.application import instructions_for_handoff
         for text in (voice_instructions(None, {'previous_calls': []}),
                      voice_instructions({'questions': []}, {'previous_calls': []}), instructions_for_handoff({'questions': []})):
             self.assertNotIn('Delegiere jede', text)
             self.assertNotIn('Delegiere die Einordnung jeder', text)
             self.assertNotIn('ausschließlich vom Backend', text)
-            self.assertIn('ohne zu delegieren', text)
+            self.assertIn('Delegiere nur', text)
             self.assertIn('erst nach', text)
 
     def test_service_authorization_fails_before_any_runtime_access(self):

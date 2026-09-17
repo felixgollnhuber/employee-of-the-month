@@ -24,14 +24,14 @@ def auth_request(state, config, database, key, secret_input=getpass.getpass):
                 "database_encryption_key": key, "use_file_database": False,
                 "use_chat_info_database": False, "use_message_database": False,
                 "use_secret_chats": False, "api_id": config["api_id"], "api_hash": config["api_hash"],
-                "system_language_code": "de", "device_model": "Codex Phone Bridge",
+                "system_language_code": "en", "device_model": "Employee of the Month",
                 "system_version": "macOS", "application_version": "0.1-signaling"}
     if kind == "authorizationStateWaitPhoneNumber":
         return {"@type": "setAuthenticationPhoneNumber", "phone_number": config["sender_phone"]}
     if kind == "authorizationStateWaitCode":
-        return {"@type": "checkAuthenticationCode", "code": secret_input("Telegram-Anmeldecode (nur lokal): ")}
+        return {"@type": "checkAuthenticationCode", "code": secret_input("Telegram login code (local input only): ")}
     if kind == "authorizationStateWaitPassword":
-        return {"@type": "checkAuthenticationPassword", "password": secret_input("Telegram-2FA-Passwort (nur lokal): ")}
+        return {"@type": "checkAuthenticationPassword", "password": secret_input("Telegram two-factor password (local input only): ")}
     if kind in ("authorizationStateReady", "authorizationStateClosing", "authorizationStateClosed"):
         return None
     # Registration, paid SMS/Premium, QR and email flows require an explicit separate implementation.
@@ -55,12 +55,12 @@ def local_key(profile, secret_input=getpass.getpass, notice=print):
         with os.fdopen(fd, "wb") as stream:
             stream.write(salt)
     if (profile / "database").exists():
-        notice("Lokale Datenbank vorhanden: die bisherige Datenbank-Passphrase verwenden. Es wird nichts zurückgesetzt.")
+        notice("An existing local database was found. Use its current database passphrase. Nothing will be reset.")
     while True:
-        password = secret_input("Lokale Datenbank-Passphrase (mindestens 16 Zeichen, nicht Telegram-Passwort): ")
+        password = secret_input("Local database passphrase (at least 16 characters, not your Telegram password): ")
         if len(password) >= 16:
             break
-        notice("Passphrase zu kurz: mindestens 16 Zeichen erforderlich. Bitte erneut eingeben; Abbrechen mit Ctrl-C. Noch keine Verbindung zu Telegram gestartet.")
+        notice("Passphrase too short. At least 16 characters are required. Try again or cancel with Ctrl-C. Telegram has not been contacted.")
     key = hashlib.scrypt(password.encode(), salt=salt, n=32768, r=8, p=1, maxmem=64 * 1024**2, dklen=32)
     return base64.b64encode(key).decode()
 

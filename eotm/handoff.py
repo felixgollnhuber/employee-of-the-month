@@ -87,8 +87,7 @@ def prepare_handoff(snapshot, request_id, *, context):
         "thread_title": _text(thread.get("title"), 1000),
         "request_id": request_id, "context": context,
         "questions": json.loads(json.dumps(questions)),
-        "instruction": "Besprich diese Rückfrage. Bestätige die verstandene Antwort mit dem Nutzer. "
-                       "Gib sie ausschließlich für diese Rückfrage zurück; führe keine Projektänderungen selbst aus.",
+        "instruction": "Discuss this question, confirm the understood answer with the user and return it only for this exact question. Do not perform project changes yourself.",
     }
     return handoff, packet
 

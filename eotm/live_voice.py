@@ -12,6 +12,7 @@ import time
 
 from .control import GateError
 from .runtime import NativePcmMedia
+from .i18n import Locale
 
 LIVE_URL = "wss://api.openai.com/v1/live/sessions"
 SAMPLE_RATE = 16000
@@ -22,16 +23,19 @@ def wants_hangup(text):
     """Recognize short, direct end-call requests, not discussion of hanging up."""
     text = re.sub(r"[^\w\s]", " ", text.casefold())
     text = " ".join(text.split())
-    if len(text) > 160 or re.search(r"\b(nicht|später|wenn|falls|warum|wie|ob)\b", text): return False
-    prefix = r"(?:(?:okay|ok|passt|danke|gut|dann|jetzt|alles klar) )*"
+    if len(text) > 160 or re.search(r"\b(nicht|später|wenn|falls|warum|wie|ob|not|do not|don t|later|if|why|how|whether)\b", text): return False
+    prefix = r"(?:(?:okay|ok|yes|all right|thanks|passt|danke|gut|dann|jetzt|alles klar) )*"
     request = (r"(?:(?:bitte )?leg(?:e)? (?:jetzt )?(?:bitte )?auf|"
                r"(?:du )?(?:kannst|darfst) (?:jetzt )?(?:bitte )?auflegen|"
                r"(?:kannst|könntest|würdest) du (?:jetzt )?(?:bitte )?auflegen|"
                r"(?:bitte )?beende (?:jetzt )?(?:bitte )?(?:den anruf|das gespräch)|"
                r"ich möchte (?:den anruf|das gespräch) beenden|"
                r"wir können (?:jetzt )?auflegen|auf wiederhören|tschüss(?: bis bald)?|"
-               r"(?:please )?(?:hang up|end the call))")
-    return re.fullmatch(prefix + request + r"(?: bitte| danke)?", text) is not None
+               r"(?:please )?hang up(?: now)?|(?:you can|we can) hang up(?: now)?|"
+               r"(?:please )?end (?:the )?(?:call|conversation)(?: now)?|"
+               r"i want to end (?:the )?(?:call|conversation)|goodbye|bye(?: for now)?|"
+               r"talk to you later|that(?: is| s) all(?: for today)?)")
+    return re.fullmatch(prefix + request + r"(?: bitte| danke| please| thanks)?", text) is not None
 
 
 def _words(text):
@@ -43,18 +47,21 @@ def mentions_hangup(text):
     with the model's own farewell right after it."""
     text = _words(text)
     if len(text) > 200 or re.search(r"\b(nicht|später|wenn|falls|warum|wie|ob|bevor|vorher|nachdem|erst|gleich|aber|"
-                                    r"schreib\w*|text|nachricht|thread|sende|schick\w*)\b", text):
+                                    r"not|do not|don t|later|if|why|how|whether|before|after|first|but|"
+                                    r"schreib\w*|text|nachricht|message|thread|sende|schick\w*|send|write)\b", text):
         return False
     return re.search(r"\b(?:aufleg(?:en|e|st)|auf wiederhören|tschüss|tschau|ciao|baba|pfiat|das w[aä]rs|das w[aä]r s|"
-                     r"schönen (?:tag|abend)|schönes wochenende|bis bald)\b|\blege?(?: \w+){0,2} auf(?: bitte| danke)*$", text) is not None
+                     r"schönen (?:tag|abend)|schönes wochenende|bis bald|hang up|goodbye|bye|talk to you later|"
+                     r"have a (?:nice|good) (?:day|evening|weekend)|that(?: is| s) all)\b|"
+                     r"\blege?(?: \w+){0,2} auf(?: bitte| danke)*$", text) is not None
 
 
 def is_farewell(text):
     """The model's closing words: at the end of what it said, never a question or a mirrored greeting."""
     if text.rstrip().endswith("?"): return False
     closing = (r"(?:tschüss|tschau|ciao|baba|pfiat di|mach s gut|machs gut|(?:auf )?wiederhören|ich lege(?: \w+)? auf|"
-               r"beende (?:das gespräch|den anruf)(?: jetzt)?)(?: \w+){0,3}")
-    wishes = r"(?:bis bald|bis dann|bis später|bis zum nächsten mal|schönen (?:tag|abend)|schönes wochenende|gute nacht)(?: felix| noch| dir| euch)?"
+               r"beende (?:das gespräch|den anruf)(?: jetzt)?|goodbye|bye|talk to you later|i(?: am| m) hanging up)(?: \w+){0,3}")
+    wishes = r"(?:bis bald|bis dann|bis später|bis zum nächsten mal|schönen (?:tag|abend)|schönes wochenende|gute nacht|see you|talk soon|have a (?:nice|good) (?:day|evening|weekend)|good night)(?: felix| now| still| noch| dir| euch)?"
     return re.search(r"\b(?:" + closing + "|" + wishes + r")$", _words(text)) is not None
 
 
@@ -62,7 +69,7 @@ def retracts(text):
     """Caller speech after a hang-up request. Courtesies, farewells and short noises do not take it back."""
     if wants_hangup(text) or mentions_hangup(text) or is_farewell(text): return False
     text = _words(text)
-    return len(text.split()) >= 4 or re.search(r"\b(halt|stopp?|warte|moment|doch nicht|nicht auflegen)\b", text) is not None
+    return len(text.split()) >= 4 or re.search(r"\b(halt|stopp?|warte|moment|doch nicht|nicht auflegen|wait|hold on|never mind|do not hang up|don t hang up)\b", text) is not None
 
 
 # Hang-up pacing. The goodbye must be generated, paced to the phone and cross the Telegram
@@ -116,7 +123,8 @@ def decode_audio(event):
 class LiveVoice:
     def __init__(self, api_key, *, instructions, audio_out, on_failure=lambda: None,
                  on_hangup=lambda: None, delegate=None, max_seconds=120, emit=lambda status: None, connector=None,
-                 voice=DEFAULT_VOICE, on_transcript=lambda transcript: None, greeting=None, wait_tone=False):
+                 voice=DEFAULT_VOICE, on_transcript=lambda transcript: None, greeting=None, wait_tone=False,
+                 locale=None):
         if not isinstance(api_key, str) or not api_key.startswith("sk-"):
             raise GateError("openai_api_key_required")
         if type(max_seconds) is not int or not 1 <= max_seconds <= 1200:
@@ -150,6 +158,7 @@ class LiveVoice:
         self.audio_received_at = self.last_played_at = self.model_played_at = 0.0
         self.playing = False
         self.wait_tone = wait_tone
+        self.locale = locale or Locale()
         self.waiting_since = None  # A delegation is being answered by the backend.
         self.wait_speech_reported = False
 
@@ -312,7 +321,7 @@ class LiveVoice:
                         else:
                             reply = await asyncio.to_thread(self.delegate, transcript)
                     else:
-                        reply = "Dies ist ein Verbindungstest. Es ist noch keine konkrete T3-Rückfrage verbunden. Führe keine Projektaktionen aus."
+                        reply = self.locale.text("connection_test")
                     if not isinstance(reply, str) or len(reply) > 1200: raise GateError("invalid_live_backend_reply")
                     # The silence Felix hears per delegation; a duration only, never any text.
                     self.emit({"backend_reply_seconds": round(time.monotonic()-asked_at, 2)})
@@ -378,7 +387,7 @@ class LiveVoice:
                             if not began and hangup["prompted_at"] is None and elapsed >= GOODBYE_PROMPT_AFTER:
                                 hangup["prompted_at"] = now
                                 await send({"type":"session.instructions.append", "delegation_id":None,
-                                            "content":"Felix möchte auflegen. Verabschiede dich jetzt kurz und freundlich. Die Verbindung wird beendet."})
+                                            "content":self.locale.text("hangup_instruction")})
                             unanswered = (not began and hangup["prompted_at"] is not None
                                           and now - hangup["prompted_at"] >= GOODBYE_START_TIMEOUT)
                             end = played or unanswered or elapsed >= GOODBYE_LIMIT
@@ -433,7 +442,7 @@ class PcmOutputPacer:
 class LivePcmMedia:
     def __init__(self, api_key, *, instructions, authorized=False, max_seconds=120,
                  delegate=None, emit=lambda status: None, voice=DEFAULT_VOICE, native_executable=None,
-                 on_transcript=lambda transcript: None, greeting=None, wait_tone=False):
+                 on_transcript=lambda transcript: None, greeting=None, wait_tone=False, locale=None):
         self.available = authorized is True
         self.stopping = False
         self.connected = threading.Event()
@@ -445,7 +454,7 @@ class LivePcmMedia:
         self.native = NativePcmMedia(on_pcm=self._from_phone, allow_audio=authorized, **native_options)
         self.voice = LiveVoice(api_key, instructions=instructions, audio_out=self._to_phone,
                                max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice, on_transcript=on_transcript,
-                               greeting=greeting, wait_tone=wait_tone)
+                               greeting=greeting, wait_tone=wait_tone, locale=locale)
         self.output_pacer = PcmOutputPacer(self._send_pcm, self.stop_event.wait)
 
     def _from_phone(self, data):

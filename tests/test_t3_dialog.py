@@ -2,8 +2,8 @@ import copy
 import json
 import unittest
 
-from telegram_bridge.control import GateError
-from telegram_bridge.t3 import T3Delegation,parse_coordinator,selected_context
+from eotm.control import GateError
+from eotm.t3 import T3Delegation,parse_coordinator,selected_context
 from test_handoff import snapshot
 
 

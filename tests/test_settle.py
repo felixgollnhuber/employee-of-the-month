@@ -2,10 +2,10 @@
 import unittest
 from unittest.mock import Mock, patch
 
-from telegram_bridge.call_history import CallHistory
-from telegram_bridge.control import GateError
-from telegram_bridge.service import TelegramService
-from telegram_bridge.t3 import (T3Client, COORDINATOR_TITLE, settle_command_id, settle_after_call,
+from eotm.call_history import CallHistory
+from eotm.control import GateError
+from eotm.service import TelegramService
+from eotm.t3 import (T3Client, COORDINATOR_TITLE, settle_command_id, settle_after_call,
                                 is_coordinator_thread)
 from test_conversations import ConversationFixture, Client
 from test_control import FixtureMedia

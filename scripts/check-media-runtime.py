@@ -10,9 +10,9 @@ root = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(root))
 sys.path.insert(0, str(root / "tests"))
 from test_descriptor import fixture_ready
-from telegram_bridge.descriptor import normalize_ready
-from telegram_bridge.runtime import DEFAULT_RUNTIME, NativeIPC, NativeMedia, validate_native_descriptor
-from telegram_bridge.control import GateError
+from eotm.descriptor import normalize_ready
+from eotm.runtime import DEFAULT_RUNTIME, NativeIPC, NativeMedia, validate_native_descriptor
+from eotm.control import GateError
 
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--executable', type=Path, default=root / DEFAULT_RUNTIME)

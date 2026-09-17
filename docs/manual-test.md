@@ -1,45 +1,26 @@
-# Manuelle Laufzeittests
+# Legacy desktop-audio test
 
-Diese Schritte sind von `make check` getrennt. Sie setzen bewusst vorbereitete Audio-Routen und einen passenden Zeitpunkt voraus. Während eines anderen laufenden Voice-Gesprächs keine Audio-Tests starten.
+The current production path streams Telegram PCM directly to GPT-Live and does not need virtual macOS audio devices. This page documents the older desktop-audio helper for contributors who still need to test it.
 
-## Voraussetzungen
+These commands are separate from `make check`. They can open audio devices and may require microphone permission. Never run them during another voice call.
 
-Die virtuellen Geräte müssen exakt `PHONE_TO_CODEX` und `CODEX_TO_PHONE` heißen. Der Prototyp lehnt fehlende oder mehrdeutige Gerätenamen ab und liest die Bindung zurück. Er ändert keine globalen Standardgeräte.
-
-Eine passende Routing-Anwendung muss separat installiert und eingerichtet werden. Im Ausgangsversuch wurde Loopback 2.5.0 Trial verwendet. Dieses Repository installiert oder lizenziert keine Drittsoftware.
-
-## CLI
-
-Aus dem Repository-Verzeichnis:
+Build the helper:
 
 ```sh
-make build fixture
-.build/AudioBridgeTest --check-devices
+make build
+make fixture
 ```
 
-| Modus | Wirkung |
+The helper expects exact, explicitly configured device UIDs and never changes the global default input or output device. A routing application must be installed and configured separately. This repository does not install or license one.
+
+Common modes:
+
+| Mode | Effect |
 | --- | --- |
-| `--check-devices` | Geräte inventarisieren und beide Namen prüfen; keine Audio-Engine |
-| `--prepare DATEI` | Datei öffnen, Graphen vorbereiten und Gerätebindung prüfen; keine gestartete Audio-Engine |
-| `--transport-test DATEI` | Datei nach zwei Sekunden auf PHONE_TO_CODEX abspielen und dort sechs Sekunden Pegel messen |
-| `--meter-input DATEI` | Sechs Sekunden PHONE_TO_CODEX messen, keine Wiedergabe |
-| `--meter-return DATEI` | Sechs Sekunden CODEX_TO_PHONE messen, keine Wiedergabe |
-| `--voice-ready DATEI` | Datei nach zwei Sekunden nach PHONE_TO_CODEX senden und zwanzig Sekunden CODEX_TO_PHONE messen |
+| `--check-devices` | Inventory and validate the two configured names without opening an audio engine. |
+| `--prepare FILE` | Open the file, prepare both graphs and verify device binding without starting playback. |
+| `--playback FILE` | Play the file into the configured outbound route. |
+| `--meter-input FILE` | Measure the inbound route for six seconds without playback. |
+| `--meter-return FILE` | Measure the return route for six seconds without playback. |
 
-Alle Modi außer `--check-devices` verlangen derzeit eine lesbare lokale Audiodatei mit einer Dauer größer Null und höchstens zehn Sekunden. Auch die reinen Messmodi öffnen die Datei und bereiten beide Graphen vor, spielen sie aber nicht ab. Dies ist eine bekannte Einschränkung der Prototyp-CLI.
-
-Beispiel für einen bewusst gestarteten reinen Transporttest:
-
-```sh
-.build/AudioBridgeTest --transport-test .build/test-tone.wav
-```
-
-Der Ton ist keine Sprachphrase. `--voice-ready` startet trotz seines Namens weder Codex noch Voice; Original-Voice muss zuvor in der gewünschten Task manuell gestartet sein. Für die Prüfung von Sprache eine eigene kurze lokale Sprachdatei verwenden oder den bewusst angeschlossenen Mikrofonweg nutzen.
-
-## Aussage und Ende
-
-Die Messung speichert nur aggregierte Pegel, keine Audiosamples. Ein erfolgreicher Exit bestätigt empfangene Frames, nicht ein vorhandenes Signal oder eine korrekte Antwort. RMS, Peak und Inhalt müssen getrennt bewertet werden. Capture kann eine macOS-Mikrofonfreigabe erfordern.
-
-Am regulären Testende werden die eigenen Audio-Engines beendet. Das Programm beendet weder eine Codex-Voice-Sitzung noch einen Telefonanruf und stellt keine extern eingerichteten Routen zurück. Diese Schritte bleiben manuell, bis ein Controller implementiert ist.
-
-Für einen späteren Telefonversuch beide Richtungen getrennt halten, das lokale Mikrofon aus dem Telefon-Hinweg entfernen und Monitoring auf Rückkopplung prüfen. Nach dem Anruf Telefonverbindung und die zugehörige Voice-Sitzung beenden. Geräteverlust und Abbruch müssen noch als vollständige Fehlerfälle getestet werden.
+Metering stores aggregate levels only, not audio samples. A successful exit confirms received frames, not audible content or a correct remote reply. Stop the phone call and any separate voice session manually after a test.

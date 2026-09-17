@@ -7,8 +7,8 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock,patch
 
-from telegram_bridge.control import GateError
-from telegram_bridge.watch import pending_requests, question_due, watch_project
+from eotm.control import GateError
+from eotm.watch import pending_requests, question_due, watch_project
 from test_handoff import snapshot
 
 
@@ -51,19 +51,19 @@ class WatchTests(unittest.TestCase):
                 def call(*args,**kwargs):
                     self.assertGreaterEqual(elapsed[0],180)
                     return {'phase':'ended'}
-                with patch('telegram_bridge.watch.T3Client.from_profile',return_value=Client()), \
-                     patch('telegram_bridge.watch.cached_database_key',return_value='fixture-key'), \
-                     patch('telegram_bridge.watch.T3Delegation',return_value=SimpleNamespace(packet={},completed=False)), \
-                     patch('telegram_bridge.watch.structurer_for_profile',return_value=None), \
-                     patch('telegram_bridge.watch.run_authorized_live_test',side_effect=call) as dial, \
-                     patch('telegram_bridge.watch.time.monotonic',side_effect=lambda:elapsed[0]), \
-                     patch('telegram_bridge.watch.time.time',side_effect=lambda:asked+elapsed[0]), \
-                     patch('telegram_bridge.watch.time.sleep',side_effect=sleep):
+                with patch('eotm.watch.T3Client.from_profile',return_value=Client()), \
+                     patch('eotm.watch.cached_database_key',return_value='fixture-key'), \
+                     patch('eotm.watch.T3Delegation',return_value=SimpleNamespace(packet={},completed=False)), \
+                     patch('eotm.watch.structurer_for_profile',return_value=None), \
+                     patch('eotm.watch.run_authorized_live_test',side_effect=call) as dial, \
+                     patch('eotm.watch.time.monotonic',side_effect=lambda:elapsed[0]), \
+                     patch('eotm.watch.time.time',side_effect=lambda:asked+elapsed[0]), \
+                     patch('eotm.watch.time.sleep',side_effect=sleep):
                     watch_project(Path(tmp),Path('/unused'),'project',authorized=True,
                         secret_input=Mock(side_effect=AssertionError('Unexpected prompt')),watch_seconds=200,question_delay_seconds=180)
                     self.assertEqual(dial.call_count,1 if answered_at is None else 0)
     def test_no_access_without_explicit_start(self):
-        with patch('telegram_bridge.watch.T3Client') as client:
+        with patch('eotm.watch.T3Client') as client:
             with self.assertRaises(GateError):
                 watch_project(Path('/unused'),Path('/unused'),'project',secret_input=lambda _:None)
             client.assert_not_called()
@@ -73,10 +73,10 @@ class WatchTests(unittest.TestCase):
         client.request.return_value={'projects':[{'id':'project'}],'threads':[]}
         secret=Mock(side_effect=AssertionError('Unexpected password prompt'))
         with tempfile.TemporaryDirectory() as tmp, \
-             patch('telegram_bridge.watch.T3Client.from_profile',return_value=client), \
-             patch('telegram_bridge.watch.cached_database_key',return_value='fixture-key'), \
-             patch('telegram_bridge.watch.time.monotonic',side_effect=[0,0,2,2]), \
-             patch('telegram_bridge.watch.time.sleep'):
+             patch('eotm.watch.T3Client.from_profile',return_value=client), \
+             patch('eotm.watch.cached_database_key',return_value='fixture-key'), \
+             patch('eotm.watch.time.monotonic',side_effect=[0,0,2,2]), \
+             patch('eotm.watch.time.sleep'):
             watch_project(Path(tmp),Path('/unused'),'project',authorized=True,secret_input=secret,watch_seconds=1)
             secret.assert_not_called()
 
@@ -99,12 +99,12 @@ class WatchTests(unittest.TestCase):
                 self.assertNotIn('PRIVATE PASSPHRASE',saved)
                 return {'phase':'ended'}
             delegate=SimpleNamespace(packet={'fixture':True},completed=False)
-            with patch('telegram_bridge.watch.T3Client.from_profile',return_value=Client()), \
-                 patch('telegram_bridge.watch.T3Delegation',return_value=delegate), \
-                 patch('telegram_bridge.watch.structurer_for_profile',return_value=None), \
-                 patch('telegram_bridge.watch.run_authorized_live_test',side_effect=call) as dial, \
-                 patch('telegram_bridge.watch.time.monotonic',side_effect=lambda:elapsed[0]), \
-                 patch('telegram_bridge.watch.time.sleep',side_effect=sleep):
+            with patch('eotm.watch.T3Client.from_profile',return_value=Client()), \
+                 patch('eotm.watch.T3Delegation',return_value=delegate), \
+                 patch('eotm.watch.structurer_for_profile',return_value=None), \
+                 patch('eotm.watch.run_authorized_live_test',side_effect=call) as dial, \
+                 patch('eotm.watch.time.monotonic',side_effect=lambda:elapsed[0]), \
+                 patch('eotm.watch.time.sleep',side_effect=sleep):
                 for _ in range(2):
                     elapsed[0]=0
                     watch_project(profile,Path('/unused'),'project',authorized=True,

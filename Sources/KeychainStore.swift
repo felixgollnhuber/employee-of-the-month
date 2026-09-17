@@ -4,13 +4,16 @@ import Security
 // stdin/stdout are private pipes owned by the Python bridge. Never use this
 // helper's `get` command as a diagnostic command or log its stdout.
 let arguments = CommandLine.arguments
-guard arguments.count == 3,
+guard (arguments.count == 3 || arguments.count == 4),
       ["get", "set"].contains(arguments[1]),
       arguments[2].range(of: "^[0-9a-f]{64}$", options: .regularExpression) != nil else { exit(2) }
 let operation = arguments[1]
+let service = arguments.count == 4
+    ? arguments[3]
+    : "CodexPhoneBridge.Telegram.DatabaseKey.v1"
 let query: [String: Any] = [
     kSecClass as String: kSecClassGenericPassword,
-    kSecAttrService as String: "CodexPhoneBridge.Telegram.DatabaseKey.v1",
+    kSecAttrService as String: service,
     kSecAttrAccount as String: arguments[2],
 ]
 func fail(_ status: OSStatus) -> Never {
@@ -35,7 +38,7 @@ if operation == "get" {
     if status == errSecItemNotFound {
         var item = query
         item[kSecValueData as String] = data
-        item[kSecAttrLabel as String] = "Mitarbeiter des Monats - Telegram-Datenbank"
+        item[kSecAttrLabel as String] = "Employee of the Month - Telegram database"
         status = SecItemAdd(item as CFDictionary, nil)
     }
     guard status == errSecSuccess else { fail(status) }

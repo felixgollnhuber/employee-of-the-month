@@ -20,7 +20,13 @@ The generated LaunchAgent uses `ProcessType=Interactive` and `LegacyTimers=true`
 
 ## Installing the LaunchAgent
 
-Stage the release with the documented deployment helper or call `eotm install-service` when that command is available in your checkout. Review the generated plist before loading it.
+Stage the release after building TDLib and the native media runtime:
+
+```sh
+eotm install-service
+```
+
+The command only copies a fixed release and writes the private plist. It does not load or start anything. Review the generated plist before loading it.
 
 Install and start it deliberately:
 

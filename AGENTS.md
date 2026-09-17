@@ -6,5 +6,5 @@
 - Audio capture, playback, route changes, logins and real calls are explicit runtime actions. `make check` must work without any of them.
 - Never commit credentials, recordings, transcripts, phone numbers, installers, app bundles or copies of proprietary source code.
 - Keep offline test results, real-service measurements and user confirmation clearly apart in docs and PR descriptions.
-- User-facing phrases and language heuristics live in `eotm/i18n.py`. Add or change them for every supported language, with tests.
+- User-facing replies and agent instructions live in `eotm/i18n.py`. Language heuristics must cover every supported language, with tests.
 - Read `docs/architecture.md` before changing the call, conversation or T3 delegation flow.

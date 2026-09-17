@@ -2,8 +2,8 @@ import json
 import unittest
 from urllib.error import HTTPError
 
-from telegram_bridge.control import GateError
-from telegram_bridge.structurer import Structurer, DEFAULT_MODEL
+from eotm.control import GateError
+from eotm.structurer import Structurer, DEFAULT_MODEL
 
 
 class Opener:
@@ -64,8 +64,8 @@ class StructurerTests(unittest.TestCase):
     def test_profile_helper_reads_the_private_live_configuration(self):
         import os, tempfile
         from pathlib import Path
-        from telegram_bridge.config import write_private_json
-        from telegram_bridge.structurer import structurer_for_profile
+        from eotm.config import write_private_json
+        from eotm.structurer import structurer_for_profile
         with tempfile.TemporaryDirectory() as directory:
             os.chmod(directory, 0o700)
             write_private_json(Path(directory), 'live.json', {'api_key':'sk-fixture-only','structuring_model':'gpt-5.6-terra'})

@@ -59,7 +59,7 @@ Fields other than `api_key` are optional:
 | --- | --- | --- |
 | `voice` | A voice supported by GPT-Live 1 | `cedar` |
 | `language` | `en` or `de` | `en` for new profiles; `de` for legacy profiles without the field |
-| `user_name` | 1 to 80 printable characters | `you` in English, `du` in German |
+| `user_name` | 1 to 80 printable characters | `the user` in English, `Felix` for a legacy German profile |
 | `agent_name` | 1 to 80 printable characters | `Employee of the Month` |
 | `structuring_model` | A valid OpenAI model ID, or `null` | `gpt-5.6-luna` |
 
