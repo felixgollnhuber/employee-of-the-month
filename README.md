@@ -1,124 +1,256 @@
-# Mitarbeiter des Monats - Codex Phone Bridge
+<div align="center">
 
-Ein lokaler Prototyp, der bei Rückfragen aus T3 Code über Telegram anrufen und mit **GPT-Live 1** sprechen kann. Die Arbeitsaufgaben bleiben in T3. Die Brücke ordnet die Telefonantwort mit einem einzelnen Strukturierungs-Aufruf ein und gibt sie an die ursprüngliche Rückfrage zurück. Der frühere separate Gesprächs-Thread ist nur noch Rückfallweg; siehe [direkter Gesprächspfad](docs/direct-voice-path.md). Dieser Umbau vom 17. September 2026 ist als Release `dc224d086f9fc59c` aktiviert und in zwei echten Telefonaten geprüft.
+# 📞 Employee of the Month
 
-## Stand: 11. September 2026
+**Your coding agents call you when they need you.**
 
-Der Nutzer hat den Wechsel von Original-Desktop-Voice zur direkten GPT-Live-API ausdrücklich gewählt. Die Stimme ist auf Cedar eingestellt; die API hat diese Konfiguration angenommen. Für den aktuellen Audioweg sind **weder Loopback noch BlackHole noch eine laufende Codex-Desktop-Voice-Sitzung erforderlich**.
+When an agent in [T3 Code](https://github.com/pingdotgg/t3code) asks you a question and you are away from your desk,<br>
+Employee of the Month rings your phone on Telegram, talks it through with you and hands your answer back to the agent.
 
-- **Echtes Gespräch bestätigt:** Telegram-Anruf verbunden, PCM in beide Richtungen übertragen, Nutzer hat mit dem Agenten gesprochen. Nach manuellem Auflegen wurden Telegram und GPT-Live bestätigt beendet.
-- **T3-Rückgabe praktisch geprüft:** Ein eigener T3-Gesprächs-Thread hat eine synthetische bestätigte Testantwort an die offene Rückfrage eines Test-Threads zurückgegeben. T3 bestätigte die Auflösung. Die beiden Test-Threads wurden anschließend archiviert.
-- **Gesamtprobe mit T3 erfolgreich:** Im echten Telefonat kamen Blau und die spätere Korrektur Grün vor. Die bestätigte Rückgabe enthielt ausschließlich `testfarbe: Grün`; die T3-Testaufgabe wurde fortgesetzt. Die Auflegebitte wurde erkannt und Telegram sowie GPT-Live wurden bestätigt beendet.
-- **100 Offline-Tests bestanden**, ebenso neun native Descriptor-/IPC-Prüfungen und der echte PCM-Callback-Test ohne Audiogeräte oder Anruf.
-- **PeakShare-Pilot pausiert:** Auf Nutzerwunsch wird der automatische Dreiminutenablauf zunächst in einem eigenen Demo-Projekt geprüft. Der PeakShare-Wächter wurde beendet; der laufende PeakShare-Arbeits-Thread bleibt unverändert. Es ist kein dauerhaft installierter Dienst aktiv.
+[![CI](https://github.com/felixgollnhuber/employee-of-the-month/actions/workflows/ci.yml/badge.svg)](https://github.com/felixgollnhuber/employee-of-the-month/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Platform: macOS on Apple Silicon](https://img.shields.io/badge/platform-macOS%20%C2%B7%20Apple%20Silicon-lightgrey)
+![Status: experimental](https://img.shields.io/badge/status-experimental-orange)
 
-Der manuell gestartete Gesamttest aus T3-Rückfrage, Telefongespräch, bestätigter Antwort, T3-Fortsetzung und Auflegen ist erfolgreich. Der automatische Projektwächter wurde noch nicht als dauerhaft laufender Dienst erprobt. Der Prototyp ist kein fertig ausgerollter Dienst.
+[Getting started](docs/getting-started.md) · [Usage](docs/usage.md) · [Architecture](docs/architecture.md) · [Configuration](docs/configuration.md) · [CLI](docs/cli.md)
 
-## Audioweg
+</div>
+
+---
 
 ```text
-Telegram am iPhone <-> TDLib + tgcalls <-> PCM16, mono, 16 kHz <-> GPT-Live 1
-                                               |
-                         Kontext und bestätigte Antworten
-                                               |
-                        T3-Gesprächs-Thread -> T3-Arbeits-Thread
+📱  *ring ring*
+
+🤖  Hi! The "Weekly report" task in Acme needs you. It wants to know whether
+    the export should be a CSV or a PDF. The report goes to the board, so it
+    is mostly read, not processed further.
+🙂  Hmm, PDF then.
+🤖  Got it: PDF for the weekly board report. Shall I pass that on?
+🙂  Yes.
+🤖  Done. The task has your answer and is carrying on.
+🙂  Great. While I have you, how is the search feature going?
+🤖  It is running. The last update says the index is built and the tests are next.
+🙂  Perfect. You can hang up.
+🤖  Bye!
 ```
 
-Der native Audioadapter liefert und empfängt PCM über private Prozess-Pipes. Er öffnet in diesem Modus keine macOS-Audiogeräte. Der alte Geräteadapter bleibt für historische Versuche vorhanden, wird im GPT-Live-Pfad aber nicht verwendet. Beide Wege verwenden echte Telegram-Signalisierung und die gebaute Medienbibliothek.
+## Why?
 
-## Build und Offline-Prüfung
+Coding agents are great at working on their own, right up until they need a decision. Then they wait, sometimes for hours, because you are in a meeting, on the train or cooking dinner.
 
-Aus dem jeweiligen Quellcheckout:
+Employee of the Month closes that gap. It watches your T3 Code projects. When a question has been waiting for a few minutes, it calls you on Telegram with a real-time voice agent that already knows the context. You talk like you would with a colleague. Once you confirm an answer, it goes straight back to the waiting thread.
+
+## Features
+
+- **📞 Calls you when an agent is blocked.** Watches every T3 Code project (or just one) and calls about open questions after a configurable delay. It dials at most once per question.
+- **🗣️ Natural conversations.** Uses OpenAI's GPT-Live 1 speech-to-speech model, so you can interrupt, change your mind or ask "wait, which report?"
+- **✅ Confirmed answers only.** The agent reads a decision back and waits for your "yes". The bridge checks that your confirmation is in the transcript before anything reaches T3.
+- **💬 Telegram text fallback.** Missed the call? You get a short message with the question. Reply in the chat, or call back whenever it suits you.
+- **📊 Status on demand.** Call in and ask "how is the search feature going?" The agent has a fresh snapshot of your tasks from the moment the call starts.
+- **✉️ Messages to any thread.** "Send the thread *Checkout redesign*: please also cover the error state."
+- **🚀 Start new work by voice.** Describe a feature. The agent proposes a project, model and reasoning effort based on your remaining provider limits, then starts a new T3 thread after you confirm.
+- **🌍 English and German.** Pick the conversation language and how the agent addresses you.
+- **🔒 Local and private.** Everything runs on your Mac. Secrets and transcripts live in owner-only files. Only your own Telegram account can reach the agent.
+- **🛟 Crash-safe.** Every call, message and T3 command is written to disk before it happens and never replayed blindly after a restart.
+
+## How it works
+
+```text
+┌──────────────┐  Telegram call  ┌───────────────────────────────┐   WebSocket   ┌──────────────┐
+│ Your phone   │◀───────────────▶│ Employee of the Month (Mac)   │◀─────────────▶│ GPT-Live 1   │
+│ (Telegram)   │  text messages  │                               │  PCM 16 kHz   │ (OpenAI API) │
+└──────────────┘                 │ TDLib + tgcalls media runtime │  delegation   └──────────────┘
+                                 │ conversation + safety logic   │
+                                 └───────────────┬───────────────┘
+                                                 │ HTTP API: read threads, answer
+                                                 │ questions, send messages, create threads
+                                                 ▼
+                                 ┌───────────────────────────────┐
+                                 │ T3 Code                       │
+                                 │ your agent threads (Codex, …) │
+                                 └───────────────────────────────┘
+```
+
+1. A T3 thread asks a structured question (T3's *ask user* feature).
+2. The bridge notices it. After the delay (3 minutes by default), it calls your personal Telegram account from a separate sender account it is logged in to.
+3. When you pick up, a native tgcalls runtime streams the call audio as raw PCM straight to a GPT-Live session. No virtual audio devices are involved. The session starts with the question, recent task messages and your latest calls.
+4. The voice agent explains, discusses and reads your decision back. When something has to happen in T3, it delegates to the bridge. One small structuring request turns the transcript into checked JSON.
+5. The bridge checks the question is still open and unchanged and that your confirmation is literally in the transcript. Then it answers the question through T3's API and waits until T3 reports it resolved.
+
+The agent in T3 needs no special setup. From its point of view, you simply answered its question. More detail in [docs/architecture.md](docs/architecture.md).
+
+## Requirements
+
+| What | Why |
+| --- | --- |
+| A Mac with **Apple Silicon** that is awake and online | The Telegram media runtime is built locally for `darwin-arm64`. |
+| **[T3 Code](https://github.com/pingdotgg/t3code)** running on that Mac | Source of the questions and target for answers. |
+| **Two Telegram accounts** | A *sender* account the bridge logs in to, and your *personal* account it calls. |
+| Your own **Telegram API ID** | Create one at [my.telegram.org](https://my.telegram.org/apps). |
+| An **OpenAI API key** with access to GPT-Live 1 | Voice conversation and answer structuring. Billed separately from ChatGPT plans. |
+| Python 3.11+, Xcode Command Line Tools, `cmake`, `gperf`, OpenSSL 3 | Building TDLib and the media runtime. |
+
+## Setup tutorial
+
+This is the complete path from a fresh clone to a first bounded call. Nothing starts automatically, and the offline check never opens the network, audio or a Telegram session.
+
+> [!IMPORTANT]
+> You need two Telegram accounts. Employee of the Month logs in as a dedicated sender account and calls your separate personal account. Do not configure both sides as the same account.
+
+### 1. Install the build tools
+
+Install Xcode Command Line Tools and the three Homebrew dependencies:
 
 ```sh
+xcode-select --install
+brew install cmake gperf openssl@3
+```
+
+You also need Python 3.11 or later, an Apple Silicon Mac and T3 Code running locally.
+
+### 2. Clone and run the safe offline checks
+
+```sh
+git clone https://github.com/felixgollnhuber/employee-of-the-month.git
+cd employee-of-the-month
 make check
-make live-deps
+```
+
+This builds only the small local test helper, generates a fixture and runs the unit tests. It does not log in, use credentials, touch audio devices, contact T3 or place a call.
+
+### 3. Build the Telegram media runtime
+
+```sh
+make telegram-native
 make telegram-runtime
-```
-
-`make check` benötigt Python 3, Swift und die Xcode Command Line Tools. Es startet keine Netzverbindung, Audioaufnahme, Wiedergabe oder Anrufe. `make live-deps` installiert die gepinnte WebSocket-Abhängigkeit unter `.build/live-venv`. `make telegram-runtime` baut die gepinnten Telegram-Abhängigkeiten und prüft den nativen Code ohne Anruf oder Hardware-Audio; dabei sind Downloads möglich.
-
-Auf diesem Mac bleibt der geprüfte Laufzeitbuild im separaten Worktree `../codex-phone-bridge-telegram`. Folgearbeiten können im Hauptcheckout stattfinden. [Übergabe für Issue #1](docs/issue-1-handoff.md) beschreibt die verfügbaren Bausteine und die Abstimmung mit einem aktiven Wächter.
-
-## Lokale Konfiguration
-
-Alle privaten Daten liegen außerhalb des Repositorys unter `~/Library/Application Support/CodexPhoneBridge/telegram/default/`, in privaten Dateien mit Modus 0600:
-
-- `config.json`: eigene Telegram-API-Daten und bewusst gewähltes Absenderkonto.
-- `target.json`: bestätigtes persönliches Telegram-Empfängerkonto.
-- `database/` und `key-salt`: verschlüsselte TDLib-Sitzung.
-- `database-keychain.json`: Bindung an den im macOS-Schlüsselbund gespeicherten Datenbankschlüssel; enthält selbst keinen Schlüssel.
-- `live.json`: eigener OpenAI-Projekt-API-Key und optional `voice` (aktuell `cedar`).
-- `t3.json`: T3-Origin und Verweis auf eine lokale private T3-Zugangsdatei. Der T3-Zugang ist vom OpenAI-Key unabhängig.
-
-Auf diesem Mac sind diese Angaben vorhanden. Ein zukünftiges Setup kann `configure`, `configure-target`, `configure-live` und anschließend `login` verwenden. Bestehende Konfiguration und Datenbank nicht neu anlegen. Die bestehende Datenbank kann inzwischen automatisch mit ihrem Schlüssel aus dem macOS-Schlüsselbund geöffnet werden. Dies wurde auf ausdrücklichen Nutzerwunsch eingerichtet und in einem neuen Prozess ohne Eingabedialog überprüft. Die Passphrase selbst wurde nicht als Klartext gespeichert.
-
-Für ein zukünftiges einmaliges Einrichten nach erfolgreichem Login:
-
-```sh
+make live-deps
 make keychain-helper
-.build/live-venv/bin/python -m telegram_bridge remember-login --passphrase-dialog
+source .build/live-venv/bin/activate
 ```
 
-Der Schlüssel wird erst nach Prüfung der Datenbank und des Telegram-Absenders gespeichert. Der kleine Keychain-Helfer liegt an einem stabilen privaten Installationspfad außerhalb des Checkouts. Einzelanrufe und der Wächter laden den Schlüssel danach ohne Passphrase-Abfrage. Ist der Schlüsselbund gesperrt oder der Eintrag nicht verfügbar, bricht die Brücke mit einem Fehler ab, statt wiederholt nach der Passphrase zu fragen. `make check` greift nicht auf den echten Schlüsselbund zu.
+The first native build downloads and compiles TDLib, WebRTC and tgcalls. Plan for several gigabytes of free disk space and a longer build.
+
+### 4. Create your private profile
+
+Get a Telegram API ID and API hash from [my.telegram.org](https://my.telegram.org/apps), then run:
 
 ```sh
-.build/live-venv/bin/python -m telegram_bridge preflight
+eotm configure
+eotm configure-target
+eotm configure-live --language en
 ```
 
-Die Vorprüfung meldet ausschließlich lokale Voraussetzungen. `ready_for_call_attempt=true` behauptet keine gerade verifizierte Telegram-Anmeldung oder verfügbare API-Quote.
+- `configure` asks for the sender account's API credentials and phone number.
+- `configure-target` asks for your personal account's public `@username`.
+- `configure-live` asks for the OpenAI project API key and stores the conversation language.
 
-## Bewusste Laufzeitaktionen
+The prompts are local and hidden where appropriate. The resulting files live outside the repository with owner-only permissions.
 
-Ein einzelnes Gespräch, maximal 120 Sekunden ab Anrufstart zuzüglich begrenzter Aufräumzeit:
+### 5. Give the bridge scoped access to T3
+
+Issue a dedicated T3 session token and save the JSON response in a private file:
 
 ```sh
-.build/live-venv/bin/python -m telegram_bridge voice-test \
-  --allow-call --seconds 120 --passphrase-dialog
+mkdir -p "$HOME/.t3"
+umask 077
+t3 auth session issue --json --label employee-of-the-month > "$HOME/.t3/eotm-session.json"
+
+eotm configure-t3 \
+  --origin http://127.0.0.1:3773 \
+  --credentials-file "$HOME/.t3/eotm-session.json"
 ```
 
-Die vorhandene Telegram-Sitzung wird über den Schlüsselbund geöffnet. Der Dialog dient nur noch als Ausweichweg für Profile, bei denen die einmalige Einrichtung noch nicht erfolgt ist. GPT-Live wird erst bei `callStateReady` gestartet. Nichtabheben startet daher keine GPT-Live-Sitzung. Der Nutzer kann am Handy auflegen oder eine kurze direkte Auflegebitte sagen. Negierte Bitten wie „nicht auflegen“ lösen kein Ende aus. Spracherkennung und natürliche Formulierungen bleiben praktisch zu erproben; der harte Zeitrahmen bleibt aktiv.
+Do not paste the token into a task, issue or shell argument. For a remote T3 instance, use HTTPS.
 
-Eine bestimmte offene T3-Rückfrage mit dem Gespräch verbinden:
+### 6. Log the sender account in to Telegram
 
 ```sh
-.build/live-venv/bin/python -m telegram_bridge voice-test \
-  --allow-call --seconds 120 --passphrase-dialog \
-  --t3-thread THREAD_ID --t3-request REQUEST_ID
+eotm login
 ```
 
-Optional `--context-file DATEI` mit einer bewusst gewählten kurzen Zusammenfassung ergänzen. Ohne diese Datei werden Aufgabentitel, Rückfrage und ein begrenzter Ausschnitt der letzten Aufgaben-Nachrichten verwendet. Tool-Ausgaben werden ausgelassen und gängige Schlüsselformate ausgeblendet.
+TDLib may ask for a login code and the sender account's existing two-factor password. The command does not create an account or place a call.
 
-Eine Rückfrage des Anrufers ist eine eigene Antwortart und keine fachliche Entscheidung. Nach der Weitergabe wartet die Brücke auf die Reaktion der Arbeitsaufgabe und bringt deren Erläuterung ins Gespräch zurück. Eine neue Ask-Frage derselben Aufgabe wird übernommen. Wenn der Arbeits-Thread ohne weitere Ask-Frage beendet wurde, kann eine spätere bestätigte Entscheidung als normale Folgeeingabe an denselben Thread gehen; erledigte Ask-IDs werden dafür nicht wiederverwendet. Unterbrochene Arbeit wird dabei nicht automatisch neu gestartet.
-
-## Begrenzter T3-Anrufwächter
+Once login succeeds, you can store the derived local database key in the macOS Keychain so the background service can restart without a passphrase prompt:
 
 ```sh
-.build/live-venv/bin/python -m telegram_bridge watch-t3 \
-  --allow-calls --project-id PROJECT_ID \
-  --max-calls 1 --watch-seconds 900 --seconds 120 --question-delay-seconds 180
+eotm remember-login --passphrase-dialog
 ```
 
-Der Beispielbefehl beobachtet 15 Minuten lang genau das ausgewählte T3-Projekt und startet höchstens einen Anruf. Die Wartezeit zählt ab dem ursprünglichen Fragezeitpunkt und bleibt auch nach einem Neustart korrekt. Vor dem Anruf wird erneut geprüft, ob die Frage noch offen ist. Mit `--question-delay-seconds 0` ist ein bewusst gewählter Sofortmodus möglich. Bei eingerichteter Schlüsselbund-Anmeldung ist auch beim Wächter keine Passphrase-Eingabe nötig. Bei älteren, noch nicht eingerichteten Profilen bleibt eine eingegebene Passphrase nur für diesen begrenzten Lauf im Speicher. Versuche werden vor dem Wählen ohne Gesprächsinhalte in `watch-attempts.json` vermerkt. Ein Neustart versucht dieselbe Rückfrage nicht erneut. Nach Nichtabheben oder Unterbrechung bleibt eine offene Frage offen; es werden noch keine Telegram-Nachrichten versendet.
+### 7. Verify readiness and place one test call
 
-Der PeakShare-Pilot wurde am 11. September 2026 um 01:49 Uhr (Europe/Vienna) mit einer Grenze bis 05:49 Uhr gestartet und anschließend auf Nutzerwunsch vorzeitig pausiert, um zunächst ein separates Beispiel zu prüfen. Seine PID, Laufzeitgrenzen und der private Logpfad stehen lokal in `peakshare-pilot.json`. GPT-Live wird während des Wartens nicht gestartet und verbraucht dabei keine Voice-Minuten.
+```sh
+eotm preflight
+eotm voice-test --allow-call --seconds 60
+```
 
-Der Wächter prüft derzeit per begrenzten HTTP-Abfragen. Er ist noch kein installierter Systemdienst und reagiert auf echte T3-Nutzerrückfragen, nicht automatisch auf beliebige Fehlertexte oder Berechtigungsfreigaben.
+The second command is the first real side effect: it calls your configured personal account. GPT-Live starts, and billing begins, only after the Telegram media connection is established. Keep this first test short and make sure no other watcher or service is using the same Telegram profile.
 
-## Kosten und Zugang
+### 8. Run the service in the foreground
 
-GPT-Live 1 benötigt einen eigenen OpenAI-API-Key und wird separat vom ChatGPT-Abo abgerechnet: derzeit 0,05 US-Dollar pro aktiver Sitzungsminute, sekundengenau. Die Einordnung der Gesprächsantworten läuft seit dem 17. September 2026 über einen direkten Responses-API-Aufruf mit `gpt-5.6-luna` und demselben Projekt-Key; das kostet Bruchteile eines Cents pro Gespräch und ersetzt die frühere Festlegung auf keine zusätzlichen API-Modelle. Mit `"structuring_model": null` in `live.json` läuft die Koordination wieder ausschließlich über den bestehenden T3-Providerzugang. [OpenAI-Preise](https://developers.openai.com/api/docs/pricing), [Client-Delegation](https://developers.openai.com/api/docs/guides/live-delegation).
+```sh
+eotm serve-t3 \
+  --all-projects \
+  --daemon \
+  --allow-messages-and-calls \
+  --allow-task-creation \
+  --seconds 1200
+```
 
-## Weitere Dokumentation
+Leave it in the foreground until you have tested an actual T3 question, a missed-call message and a callback. Then follow [Running as a service](docs/service.md) to stage a fixed release and activate the LaunchAgent deliberately.
 
-- [Aktiver dauerhafter Sprachagent: alle Projekte, neue Feature-Threads und Modellwahl](docs/all-projects-service.md).
-- [Direkter Gesprächspfad ohne Koordinator-Thread: Ablauf, Kosten, Nachweise](docs/direct-voice-path.md).
+For screenshots-free, command-by-command explanations and upgrade notes, see the longer [getting started guide](docs/getting-started.md).
 
-- [Telegram-Folgedialoge, Rückrufe und Statusanrufe mit serve-t3](docs/telegram-service.md).
-- [T3-Integration und Abo-/API-Entscheidung](docs/t3-voice-integration.md).
-- [Nachweise und Aussagegrenzen](docs/evidence.md).
-- [Historischer Telegram-/Desktop-Aufbau](docs/telegram-control.md).
-- [Historische manuelle Tests mit virtuellen Audiogeräten](docs/manual-test.md).
-- [Issue #1: Telegram-Folgedialog, Rückrufe und eingehende Statusanrufe](https://github.com/felixgollnhuber/codex-phone-bridge/issues/1). Für später festgehalten, noch nicht implementiert.
+## Costs
 
-Keine Zugangsdaten, Tonaufnahmen, Installer, App-Bundles, fremden Quellcodekopien oder vorgefertigten Binärdateien werden versioniert. Für eine mögliche Veröffentlichung wurde noch keine eigene Gesamtlizenz gewählt.
+You pay OpenAI directly for API usage:
+
+- **GPT-Live 1:** $0.05 per active session minute, billed per second. A 5-minute call costs about $0.25. The session only starts once you pick up, so unanswered calls cost nothing.
+- **Structuring requests:** a small `gpt-5.6-luna` request per delegated turn, usually a fraction of a cent per call. Set `"structuring_model": null` to use a T3 thread for this instead.
+
+Prices as of September 2026. See [OpenAI pricing](https://developers.openai.com/api/docs/pricing). Telegram calls are free.
+
+## Privacy and safety
+
+- **Nothing leaves your Mac** except the call itself (Telegram), the conversation (OpenAI) and requests to your own T3 server.
+- **No audio is recorded.** Text transcripts of recent calls are kept locally so the agent can pick up where you left off: at most 8 calls with 24,000 characters each.
+- **Strict caller identity.** Calls and messages from any Telegram account other than your configured personal account are ignored.
+- **Explicit gates.** Every command that can call, send messages or start T3 work requires an `--allow-…` flag. `make check` never touches the network.
+- **No blind retries.** If the outcome of a T3 command or Telegram message is unclear after a crash, the bridge reports it and does not send again.
+
+See [SECURITY.md](SECURITY.md) for how to report vulnerabilities.
+
+## Status and limitations
+
+Employee of the Month is an **experimental personal project**. It is used every day by its author, but expect rough edges:
+
+- macOS on Apple Silicon only, and the Mac has to be awake.
+- It relies on T3 Code's orchestration HTTP API. That API is not a stable public contract and may change.
+- Only questions asked through T3's structured *ask user* feature trigger calls. Approval requests and plain-text questions do not.
+- One configured person per installation.
+- Voice recognition of short phrases like "hang up" works well, but is not perfect. Every call has a hard time limit (20 minutes at most).
+
+## Documentation
+
+| Guide | |
+| --- | --- |
+| [Getting started](docs/getting-started.md) | Build, configure and place your first call |
+| [Usage](docs/usage.md) | What you can say and write, with examples |
+| [Configuration](docs/configuration.md) | Profile files, language, voice and model settings |
+| [CLI reference](docs/cli.md) | Every command and flag |
+| [Running as a service](docs/service.md) | launchd setup, releases, health and logs |
+| [Architecture](docs/architecture.md) | Components, call flow, state and safety model |
+| [Troubleshooting](docs/troubleshooting.md) | Common problems and how to fix them |
+
+## Contributing
+
+Contributions are welcome! Please read [CONTRIBUTING.md](CONTRIBUTING.md) first. The short version: `make check` must stay offline, and no secrets go into the repository.
+
+## Acknowledgements
+
+Built on the shoulders of [TDLib](https://github.com/tdlib/td), [tgcalls](https://github.com/TelegramMessenger/tgcalls), [Telegram-iOS](https://github.com/TelegramMessenger/Telegram-iOS) and [WebRTC](https://webrtc.org/). They are downloaded at build time under their own licenses and are not part of this repository.
+
+Employee of the Month is an independent project. It is not affiliated with or endorsed by Telegram, OpenAI or T3 Code.
+
+## License
+
+[MIT](LICENSE) © 2026 Felix Gollnhuber

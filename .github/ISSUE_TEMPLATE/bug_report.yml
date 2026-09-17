@@ -1,0 +1,54 @@
+name: Bug report
+description: Something does not work as documented.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! Please **remove API keys, phone numbers, Telegram usernames, T3 tokens and call transcripts** from everything you paste below.
+        Security problems belong in a private report, see SECURITY.md.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. eotm serve-t3 --all-projects ...
+        2. Asked a question in a T3 thread
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: output
+    attributes:
+      label: Relevant JSON output or service log lines
+      description: The bridge prints one JSON object per line. Paste the lines around the problem.
+      render: json
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Setup / build
+        - Telegram login or calls
+        - Voice conversation (GPT-Live)
+        - T3 Code integration
+        - Telegram text messages
+        - Background service (launchd)
+        - Documentation
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: "commit abc1234, macOS 26.1, Python 3.12, T3 Code 0.x"
+    validations:
+      required: true

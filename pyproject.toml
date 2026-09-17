@@ -1,0 +1,37 @@
+[build-system]
+requires = ["setuptools>=75"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "employee-of-the-month"
+version = "0.1.0"
+description = "A Telegram voice bridge that gets human decisions back into T3 Code"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { file = "LICENSE" }
+authors = [{ name = "Felix Gollnhuber" }]
+keywords = ["t3-code", "telegram", "voice-agent", "openai", "gpt-live"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: MacOS X",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: MacOS :: MacOS X",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Communications :: Telephony",
+]
+dependencies = ["websockets==16.1.1"]
+
+[project.urls]
+Homepage = "https://github.com/felixgollnhuber/employee-of-the-month"
+Issues = "https://github.com/felixgollnhuber/employee-of-the-month/issues"
+Source = "https://github.com/felixgollnhuber/employee-of-the-month"
+
+[project.scripts]
+eotm = "eotm.__main__:run"
+
+[tool.setuptools]
+packages = ["eotm"]

@@ -1,9 +1,10 @@
-# Projektregeln
+# Project rules for coding agents
 
-- Deutsch mit korrekten Umlauten; nur normale Bindestriche verwenden.
-- Gewählter Weg seit 11. September 2026: GPT-Live 1 direkt über die OpenAI-API, mit Telegram-Audio und Rückgabe an den zugehörigen T3-Thread. Der Nutzer hat die zusätzliche Voice-Abrechnung akzeptiert. Die frühere Bindung an Original-Desktop-Voice ist damit ersetzt. Kein stiller Wechsel auf Realtime oder TTS.
-- Build und Offline-Prüfungen dürfen laufende Voice-Gespräche nicht beeinflussen.
-- Audio-Capture, Wiedergabe, Routenänderungen und echte Anrufe sind eigenständige bewusste Laufzeitaktionen. `make check` muss ohne sie auskommen.
-- Keine Zugangsdaten, Aufnahmen, Installer, App-Bundles oder proprietären Quellcodekopien versionieren.
-- Historische Messungen, Nutzerbestätigung und offene Gates klar unterscheiden.
-- Für Arbeiten an Issue #1 zuerst `docs/issue-1-handoff.md` lesen. Dort sind vorhandene Bausteine, die getrennte Laufzeit und die exklusive Telegram-Profilsitzung beschrieben.
+- Write code, comments, docs and commit messages in English.
+- The voice path is GPT-Live 1 over the OpenAI API, with Telegram audio and answers returned to the originating T3 Code thread. Do not silently switch to another realtime or text-to-speech stack.
+- Builds and offline checks must never affect a running call or the installed service.
+- Audio capture, playback, route changes, logins and real calls are explicit runtime actions. `make check` must work without any of them.
+- Never commit credentials, recordings, transcripts, phone numbers, installers, app bundles or copies of proprietary source code.
+- Keep offline test results, real-service measurements and user confirmation clearly apart in docs and PR descriptions.
+- User-facing phrases and language heuristics live in `eotm/i18n.py`. Add or change them for every supported language, with tests.
+- Read `docs/architecture.md` before changing the call, conversation or T3 delegation flow.
