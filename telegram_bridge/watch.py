@@ -7,7 +7,7 @@ import tempfile
 import time
 from datetime import datetime
 
-from .application import run_authorized_live_test, instructions_for_handoff
+from .application import run_authorized_live_test, instructions_for_handoff, GREETING
 from .config import read_private_json, private_directory
 from .control import GateError
 from .handoff import _pending, pending_requests
@@ -97,7 +97,7 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
                     try:
                         result = run_authorized_live_test(profile,library,authorized=True,max_seconds=call_seconds,
                             secret_input=legacy_input,emit=emit,delegate=delegation,
-                            instructions=instructions_for_handoff(delegation.packet))
+                            instructions=instructions_for_handoff(delegation.packet),greeting=GREETING)
                         attempts[key]["status"] = "answered" if delegation.completed else "open_after_"+result["phase"]
                     except BaseException:
                         attempts[key]["status"] = "attempt_failed_or_interrupted"

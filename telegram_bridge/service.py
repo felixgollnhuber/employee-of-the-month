@@ -1,5 +1,6 @@
 """Explicit runtime: one TDLib owner for outbound calls, messages and incoming audio."""
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from contextlib import contextmanager
 import fcntl
 import os
@@ -46,6 +47,23 @@ def voice_instructions(packet, recent_context):
         + json.dumps(recent_context, ensure_ascii=False))
 
 
+def status_context(brief):
+    return ('\nStand in T3 von ' + datetime.now().strftime('%H:%M') + ' Uhr. Beantworte Statusfragen direkt daraus; '
+            'nur für einen ausdrücklich frischen Stand delegiere:\n' + brief)
+
+
+def build_media(config, delegate, *, call_seconds, emit, native_executable):
+    """The live voice for one service call: rules, spoken greeting, wait tone and transcript journal."""
+    from .application import GREETING
+    from .live_voice import LivePcmMedia, DEFAULT_VOICE
+    packet = delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'] if delegate.operation_id else None
+    return LivePcmMedia(config.get('api_key'), instructions=voice_instructions(packet, delegate.recent_context()),
+        greeting=GREETING, wait_tone=config.get('wait_tone', True) is not False,
+        authorized=True, max_seconds=call_seconds, delegate=delegate, emit=emit,
+        voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable,
+        on_transcript=delegate.remember)
+
+
 class VoiceConversation:
     def __init__(self, conversations, lock, operation_id=None, launcher=None, history=None):
         self.conversations, self.lock, self.operation_id = conversations, lock, operation_id
@@ -71,8 +89,7 @@ class VoiceConversation:
         return cached[1]
 
     def call_context(self):
-        return ('\nStand in T3 zu Beginn dieses Anrufs. Beantworte Statusfragen direkt daraus:\n'
-                + self.conversations.status_brief(snapshot=self.status_snapshot))
+        return status_context(self.conversations.status_brief(snapshot=self.status_snapshot))
 
     def remember(self, transcript=None):
         if self.history:
@@ -340,7 +357,7 @@ class VoiceConversation:
                     'mit dessen ID zurück, new_task=null und operation_id=null. Bei mehreren möglichen Aufträgen frage nach. '
                     'Erzeuge dafür keinen doppelten Vorschlag. Alte Bestätigungen dürfen nicht erneut verwendet werden. ')
                 task_data = {'projects': [{'id': p['id'], 'title': p['title']} for p in c.projects()],
-                             'providers': self.launcher.advisor.options(),
+                             'providers': self.launcher.advisor.options(max_age=600),
                              'pending_proposal': self.launcher.jobs.get(self.proposal_id)}
             prompt = (task_instructions + 'Du bist Mitarbeiter des Monats. Beantworte die Statusfrage kurz auf Deutsch anhand der Daten. '
                       'Keine Tools oder Projektaktionen. Bei mehreren offenen Vorgängen erst kurz nachfragen. '
@@ -417,6 +434,8 @@ class TelegramService:
         self.min_call_interval = min_call_interval
         self.backend_error = None
         self.project_count = 0
+        self.status_cache = None  # (clock, text): recent compact status, kept warm while idle
+        self.status_checked_at = None
         self.launcher = None
         if allow_tasks:
             from .providers import ProviderAdvisor
@@ -492,6 +511,11 @@ class TelegramService:
         backend = self.media.backend
         self.voice.revision = lambda: backend.voice.input_revision
         self.call_deadline = self.clock() + self.call_seconds
+        # An incoming call connects faster than any prefetch, so its warm status goes in before accepting.
+        # An outgoing call rings long enough for a fresh one, which then includes the question it is about.
+        warm = self.status_cache if incoming and self.status_cache and self.clock() - self.status_cache[0] <= 180 else None
+        extend = getattr(backend, 'extend_instructions', None)
+        has_status = bool(warm and extend and extend(warm[1]))
         if incoming:
             self.voice.call_id = incoming['id']
             self.voice.call_key = self.call_key(incoming['id'])
@@ -500,22 +524,38 @@ class TelegramService:
             self.calls += 1
             self.session.start(self.conversations.data['target_id'], authorized=True, consent=True)
         self.emit({'conversation_call_started': True, 'operation_id': operation_id, 'incoming': incoming is not None})
-        self.prefetch_context(self.voice, backend)
+        self.prefetch_context(self.voice, backend, status=not has_status)
 
-    def prefetch_context(self, voice, backend):
-        """Load the task status while the phone rings, so the voice answers status questions without a backend hop."""
+    @staticmethod
+    def failure(error):
+        """Log-safe reason: gate codes are fixed strings, anything else only by type name."""
+        return str(error) if isinstance(error, GateError) else type(error).__name__
+
+    def warm_status(self):
+        """Idle only. One broken thread must never stop scanning, so nothing escapes from here."""
+        if self.status_checked_at is not None and self.clock() - self.status_checked_at < 60: return
+        self.status_checked_at = self.clock()
+        try: self.status_cache = (self.clock(), status_context(self.conversations.status_brief()))
+        except Exception as error:
+            self.status_cache = None
+            self.emit({'voice_context_prefetch_failed': self.failure(error)})
+
+    def prefetch_context(self, voice, backend, status=True):
+        """Optional work while the phone rings, so that no spoken turn has to wait for it.
+        Nothing here may reach the service loop or end the call."""
         extend = getattr(backend, 'extend_instructions', None)
-        if extend is None: return
-        def prefetch():
+        def load_status():
             try: return voice.call_context()
-            except GateError as error:
-                self.emit({'voice_context_prefetch_failed': str(error)})
-            except Exception as error:
-                # Optional context: unexpected T3 data must never reach the service loop. Name only, no message.
-                self.emit({'voice_context_prefetch_failed': type(error).__name__})
+            except Exception as error: self.emit({'voice_context_prefetch_failed': self.failure(error)})
         def deliver(text):
             if text and not extend(text): self.emit({'voice_context_prefetch_unused': True})  # Too late or too large.
-        try: self.submit(prefetch, deliver)
+        def warm_catalog():
+            # Account reads start provider processes and take seconds.
+            try: self.launcher.advisor.refresh(max_age=600)
+            except Exception as error: self.emit({'provider_catalog_warmup_failed': self.failure(error)})
+        try:
+            if status and extend: self.submit(load_status, deliver)
+            if self.launcher: self.submit(warm_catalog)
         except GateError as error: self.emit({'voice_context_prefetch_failed': str(error)})
 
     def settle_after_call(self, voice, status):
@@ -544,6 +584,7 @@ class TelegramService:
         self.conversations.discover(self.delay)
         self.project_count = len(self.conversations.projects())
         self.conversations.poll_dialogs()
+        self.warm_status()
         if self.launcher: self.launcher.recover()
         if not self.recovered:
             self.conversations.recover()
@@ -584,6 +625,7 @@ class TelegramService:
                 self.session._stop_media()
                 self.history.finish(voice.conversation_id, status)
                 self.session = self.media = self.voice = None
+                self.status_cache = self.status_checked_at = None  # The call may have changed what is open.
                 self.submit(lambda: self.settle_after_call(voice, status))
                 if status['phase'] == 'end_unconfirmed' or status.get('media_cleanup_confirmed') is False:
                     raise GateError('service_call_cleanup_unconfirmed')
@@ -652,14 +694,8 @@ def run_service(profile, library, project_id, *, authorized=False, seconds=3600,
     if project_id != '*' and not any(p.get('id') == project_id for p in client.request('/api/orchestration/shell').get('projects', [])):
         raise GateError('explicit_t3_project_required')
     config = read_private_json(profile, 'live.json')
-    from .live_voice import LivePcmMedia, DEFAULT_VOICE
     def media_factory(delegate):
-        packet = delegate.conversations.data['operations'][delegate.operation_id]['dialog']['packet'] if delegate.operation_id else None
-        instructions = voice_instructions(packet, delegate.recent_context())
-        return LivePcmMedia(config.get('api_key'), instructions=instructions,
-            authorized=True, max_seconds=call_seconds, delegate=delegate, emit=emit,
-            voice=config.get('voice', DEFAULT_VOICE), native_executable=native_executable,
-            on_transcript=delegate.remember)
+        return build_media(config, delegate, call_seconds=call_seconds, emit=emit, native_executable=native_executable)
     # existing_authenticated_client holds session.lock for this entire lifetime.
     startup_events = []
     def buffer(event):

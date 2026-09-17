@@ -326,14 +326,21 @@ class T3Delegation:
 
     def _coordinate(self,prompt):
         """One direct structuring request. The T3 coordination thread is only the slow fallback."""
+        started=time.monotonic()
         if self.structurer is not None:
-            try:return self.structurer(prompt)
+            try:
+                result=self.structurer(prompt)
+                self.emit({"structuring_seconds":round(time.monotonic()-started,2),"path":"direct"})
+                return result
             except GateError as error:self.emit({"structurer_fallback":str(error)})
+        started=time.monotonic()
         if self.coordinator_id is None:
             self.coordinator_id=self.client.create_coordinator(self.source)
             self.checkpoint()
             self.emit({"t3_coordinator_thread":self.coordinator_id})
-        return self.client.run_coordinator(self.coordinator_id,prompt,cancelled=self.cancelled)
+        result=self.client.run_coordinator(self.coordinator_id,prompt,cancelled=self.cancelled)
+        self.emit({"structuring_seconds":round(time.monotonic()-started,2),"path":"coordinator"})
+        return result
 
     def _validate_source(self,snapshot):
         source=snapshot.get("thread",{})

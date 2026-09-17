@@ -1,6 +1,6 @@
 # Mitarbeiter des Monats - Codex Phone Bridge
 
-Ein lokaler Prototyp, der bei Rückfragen aus T3 Code über Telegram anrufen und mit **GPT-Live 1** sprechen kann. Die Arbeitsaufgaben bleiben in T3. Die Brücke ordnet die Telefonantwort mit einem einzelnen Strukturierungs-Aufruf ein und gibt sie an die ursprüngliche Rückfrage zurück. Der frühere separate Gesprächs-Thread ist nur noch Rückfallweg; siehe [direkter Gesprächspfad](docs/direct-voice-path.md). Dieser Umbau vom 17. September 2026 ist offline getestet, aber noch nicht im laufenden Dienst aktiviert.
+Ein lokaler Prototyp, der bei Rückfragen aus T3 Code über Telegram anrufen und mit **GPT-Live 1** sprechen kann. Die Arbeitsaufgaben bleiben in T3. Die Brücke ordnet die Telefonantwort mit einem einzelnen Strukturierungs-Aufruf ein und gibt sie an die ursprüngliche Rückfrage zurück. Der frühere separate Gesprächs-Thread ist nur noch Rückfallweg; siehe [direkter Gesprächspfad](docs/direct-voice-path.md). Dieser Umbau vom 17. September 2026 ist als Release `dc224d086f9fc59c` aktiviert und in zwei echten Telefonaten geprüft.
 
 ## Stand: 11. September 2026
 

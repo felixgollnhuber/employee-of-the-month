@@ -89,6 +89,16 @@ class AdvisorTests(unittest.TestCase):
         self.assertEqual(reader.call_count, 2)
         self.assertEqual(advisor.coordinator_selection()['instanceId'], 'codex-2')
 
+    def test_prompt_data_reuses_the_catalog_within_a_call_while_validation_stays_fresh(self):
+        advisor, client, _ = self.make_advisor()
+        with patch('telegram_bridge.providers.time.monotonic', return_value=1000.0): advisor.refresh()
+        calls = client.rpc.call_count
+        with patch('telegram_bridge.providers.time.monotonic', return_value=1300.0):
+            self.assertEqual(len(advisor.options(max_age=600)), 2)
+            self.assertEqual(client.rpc.call_count, calls)
+            advisor.validate({'instanceId': 'codex-2', 'model': 'gpt-5.6-sol', 'options': []})
+            self.assertGreater(client.rpc.call_count, calls)
+
     def test_unknown_stale_and_exhausted_limits_are_not_invented(self):
         self.assertIsNone(remaining_capacity({}))
         old = limits(); old['checkedAt'] = '2000-01-01T00:00:00Z'

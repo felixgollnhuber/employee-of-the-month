@@ -370,6 +370,76 @@ class ServiceTests(ConversationFixture, unittest.TestCase):
         self.assertIn('Fixture task', text)
         self.assertIn('Welche Variante?', text)
 
+    def test_idle_scan_keeps_a_warm_status_that_is_in_place_before_an_incoming_call_is_accepted(self):
+        order = []
+        self.media.extend_instructions = Mock(side_effect=lambda text: order.append('context') or True)
+        self.td.send.side_effect = lambda request: order.append(request['@type'])
+        self.s.scan()
+        self.s.event(self.incoming())
+        self.s.tick()
+        self.drain()
+        self.assertEqual(order[:2], ['context', 'acceptCall'])
+        self.media.extend_instructions.assert_called_once()
+        text = self.media.extend_instructions.call_args.args[0]
+        self.assertIn('Fixture task', text)
+        self.assertIn('Welche Variante?', text)
+
+    def test_outgoing_calls_load_a_fresh_status_that_includes_their_own_question(self):
+        order = []
+        self.media.extend_instructions = Mock(side_effect=lambda text: order.append('context') or True)
+        self.td.send.side_effect = lambda request: order.append(request['@type'])
+        identifier = self.s.scan()
+        self.assertEqual(identifier, self.identifier)
+        self.s.status_cache = (self.s.status_cache[0], 'VERALTET: Offene Rückfragen: keine')
+        self.s.start_call(identifier)
+        self.drain()
+        self.assertEqual(order[0], 'createCall')
+        self.media.extend_instructions.assert_called_once()
+        text = self.media.extend_instructions.call_args.args[0]
+        self.assertNotIn('VERALTET', text)
+        self.assertIn(identifier, text)
+
+    def test_a_finished_call_invalidates_the_warm_status(self):
+        self.s.scan()
+        self.assertIsNotNone(self.s.status_cache)
+        self.s.event(self.incoming())
+        self.s.tick()
+        self.drain()
+        self.s.session.phase, self.s.session.reason = 'ended', 'remote_end'
+        self.s.tick()
+        self.drain()
+        self.assertIsNone(self.s.session)
+        self.assertIsNone(self.s.status_cache)
+
+    def test_outdated_warm_status_is_replaced_by_a_fresh_prefetch(self):
+        self.media.extend_instructions = Mock(return_value=True)
+        self.s.scan()
+        self.s.status_cache = (self.s.status_cache[0], 'VERALTET')
+        self.clock[0] += 1000
+        self.s.event(self.incoming())
+        self.s.tick()
+        self.drain()
+        text = self.media.extend_instructions.call_args.args[0]
+        self.assertNotIn('VERALTET', text)
+        self.assertIn('Fixture task', text)
+
+    def test_broken_status_data_during_the_idle_scan_never_stops_the_service(self):
+        events = []
+        self.s.emit = events.append
+        self.c.status_brief = Mock(side_effect=KeyError('title'))
+        self.s.scan()
+        self.assertIsNone(self.s.status_cache)
+        self.assertIn({'voice_context_prefetch_failed': 'KeyError'}, events)
+
+    def test_structuring_time_is_reported_separately_from_the_whole_backend_reply(self):
+        events = []
+        self.c.emit = events.append
+        self.direct('{"reply":"Läuft.","operation_id":null}')
+        VoiceConversation(self.c, self.s.lock)([{'role': 'user', 'text': 'Wie läuft es?'}])
+        timing = next(e for e in events if 'structuring_seconds' in e)
+        self.assertEqual(timing['path'], 'direct')
+        self.assertGreaterEqual(timing['structuring_seconds'], 0)
+
     def test_failed_status_prefetch_never_fails_the_call(self):
         events = []
         self.s.emit = events.append
