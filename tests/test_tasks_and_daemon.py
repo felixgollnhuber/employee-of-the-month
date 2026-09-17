@@ -8,12 +8,12 @@ import threading
 import unittest
 from unittest.mock import Mock, patch
 
-from telegram_bridge.conversations import ConversationStore, Conversations
-from telegram_bridge.control import GateError
-from telegram_bridge.providers import ProviderAdvisor, remaining_capacity
-from telegram_bridge.tasks import TaskLauncher, explicit_confirmation
-from telegram_bridge.daemon import prepare_install
-from telegram_bridge.service import VoiceConversation, TelegramService
+from eotm.conversations import ConversationStore, Conversations
+from eotm.control import GateError
+from eotm.providers import ProviderAdvisor, remaining_capacity
+from eotm.tasks import TaskLauncher, explicit_confirmation
+from eotm.daemon import prepare_install
+from eotm.service import VoiceConversation, TelegramService
 from test_conversations import ConversationFixture
 from test_control import FixtureMedia
 
@@ -70,7 +70,7 @@ class MultiProjectTests(ConversationFixture, unittest.TestCase):
         self.assertEqual(len(self.c.data['operations']), 2)
         self.assertIsNotNone(self.c.reserve_attempt(0, min_interval=180))
         self.assertIsNone(self.c.reserve_attempt(0, min_interval=180))
-        with patch('telegram_bridge.conversations.time.time', return_value=1790000181):
+        with patch('eotm.conversations.time.time', return_value=1790000181):
             self.assertIsNotNone(self.c.reserve_attempt(0, min_interval=180))
 
 
@@ -91,9 +91,9 @@ class AdvisorTests(unittest.TestCase):
 
     def test_prompt_data_reuses_the_catalog_within_a_call_while_validation_stays_fresh(self):
         advisor, client, _ = self.make_advisor()
-        with patch('telegram_bridge.providers.time.monotonic', return_value=1000.0): advisor.refresh()
+        with patch('eotm.providers.time.monotonic', return_value=1000.0): advisor.refresh()
         calls = client.rpc.call_count
-        with patch('telegram_bridge.providers.time.monotonic', return_value=1300.0):
+        with patch('eotm.providers.time.monotonic', return_value=1300.0):
             self.assertEqual(len(advisor.options(max_age=600)), 2)
             self.assertEqual(client.rpc.call_count, calls)
             advisor.validate({'instanceId': 'codex-2', 'model': 'gpt-5.6-sol', 'options': []})
@@ -246,8 +246,9 @@ class LifecycleTests(ConversationFixture, unittest.TestCase):
         td.send.assert_called_once()
 
     def test_release_install_has_fixed_code_no_secrets_and_no_automatic_launch(self):
-        root = Path(self.temp.name)/'source'; (root/'telegram_bridge').mkdir(parents=True)
-        (root/'telegram_bridge/__init__.py').write_text('')
+        root = Path(self.temp.name)/'source'; (root/'eotm').mkdir(parents=True)
+        (root/'eotm/__init__.py').write_text('')
+        (root/'eotm/__main__.py').write_text('')
         (root/'secret.key').write_text('PRIVATE')
         for name in ('python','libtdjson.dylib','media_runtime'): (root/name).write_text('fixture')
         staged, release = prepare_install(root, Path(self.temp.name)/'service', self.store.profile,
@@ -263,5 +264,5 @@ class LifecycleTests(ConversationFixture, unittest.TestCase):
         self.assertEqual(config['ProcessType'], 'Interactive')
         self.assertTrue(config['LegacyTimers'])
         self.assertFalse((release/'secret.key').exists())
-        (root/'telegram_bridge/__init__.py').write_text('changed')
-        self.assertEqual((release/'telegram_bridge/__init__.py').read_text(),'')
+        (root/'eotm/__init__.py').write_text('changed')
+        self.assertEqual((release/'eotm/__init__.py').read_text(),'')

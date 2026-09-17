@@ -1,7 +1,7 @@
 import unittest
 
-from telegram_bridge.control import GateError, UnavailableMedia
-from telegram_bridge.live import LiveCallLoop, RequestError, RequestPump, resolve_target
+from eotm.control import GateError, UnavailableMedia
+from eotm.live import LiveCallLoop, RequestError, RequestPump, resolve_target
 
 
 class FixtureTD:

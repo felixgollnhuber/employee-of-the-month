@@ -4,16 +4,16 @@ import subprocess
 import unittest
 from unittest.mock import patch
 
-from telegram_bridge.auth import AuthGate
-from telegram_bridge.control import GateError
-from telegram_bridge.ringing import RingingSession, macos_passphrase, ring_once, run_authorized_ring_test
+from eotm.auth import AuthGate
+from eotm.control import GateError
+from eotm.ringing import RingingSession, macos_passphrase, ring_once, run_authorized_ring_test
 from test_live import FixtureTD, FixtureMedia
 
 
 class RingingTests(unittest.TestCase):
     def test_no_call_without_consent_or_valid_duration(self):
         for kwargs in ({}, {"call_authorized": True, "max_seconds": 0}):
-            with patch("telegram_bridge.ringing.read_profile") as profile:
+            with patch("eotm.ringing.read_profile") as profile:
                 with self.assertRaises(GateError):
                     run_authorized_ring_test(Path("/unused"), Path("/unused"), Path("/unused"), **kwargs)
                 profile.assert_not_called()
@@ -81,10 +81,10 @@ class RingingTests(unittest.TestCase):
         self.assertFalse(any(x["@type"] == "createCall" for x in td.sent))
 
     def test_dialog_preserves_whitespace_and_does_not_expose_error_output(self):
-        with patch("telegram_bridge.ringing.subprocess.run", return_value=subprocess.CompletedProcess([], 0, " secret \n", "")) as run:
+        with patch("eotm.ringing.subprocess.run", return_value=subprocess.CompletedProcess([], 0, " secret \n", "")) as run:
             self.assertEqual(macos_passphrase("ignored"), " secret ")
             self.assertTrue(run.call_args.kwargs["capture_output"])
-        with patch("telegram_bridge.ringing.subprocess.run", return_value=subprocess.CompletedProcess([], 1, "PRIVATE", "PRIVATE")):
+        with patch("eotm.ringing.subprocess.run", return_value=subprocess.CompletedProcess([], 1, "PRIVATE", "PRIVATE")):
             with self.assertRaises(AuthGate) as raised:
                 macos_passphrase("ignored")
             self.assertNotIn("PRIVATE", str(raised.exception))

@@ -15,15 +15,15 @@ check: build fixture
 
 telegram-check:
 	python3 -m unittest discover -s tests -v
-	python3 -m telegram_bridge demo
+	python3 -m eotm demo
 
 telegram-native:
 	python3 scripts/build-tdlib.py
-	python3 -m telegram_bridge native-check
+	python3 -m eotm native-check
 
 telegram-media:
 	python3 scripts/build-media.py
-	python3 -m telegram_bridge media-check
+	python3 -m eotm media-check
 
 telegram-runtime: telegram-media
 	python3 scripts/check-media-runtime.py
@@ -31,7 +31,7 @@ telegram-runtime: telegram-media
 
 live-deps:
 	python3 -m venv .build/live-venv
-	.build/live-venv/bin/python -m pip install -r requirements-live.txt
+	.build/live-venv/bin/python -m pip install -e .
 
 keychain-helper: .build/KeychainStore
 

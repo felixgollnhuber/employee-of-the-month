@@ -12,6 +12,7 @@ import subprocess
 import time
 
 from .control import GateError
+from .i18n import Locale
 
 
 def codex_account(config, *, timeout=12):
@@ -102,8 +103,9 @@ def remaining_capacity(limits, now=None):
 
 
 class ProviderAdvisor:
-    def __init__(self, client, account_reader=codex_account):
+    def __init__(self, client, account_reader=codex_account, locale=None):
         self.client, self.account_reader = client, account_reader
+        self.locale = locale or Locale()
         self.catalog = []
         self.last_refresh = 0
 
@@ -188,7 +190,8 @@ class ProviderAdvisor:
                 if d['id'] in ('reasoningEffort','effort'):
                     effort = d.get('currentValue') or next((o['id'] for o in d.get('options',[]) if o.get('isDefault')), None)
         capacity = provider['remaining_percent']
-        quota = 'Die verbleibenden Limits sind derzeit nicht verlässlich verfügbar.' if capacity is None else f'Im knappsten gemeldeten Limitfenster sind {capacity:g} Prozent frei.'
+        quota = (self.locale.text('quota_unknown') if capacity is None
+                 else self.locale.text('quota_known', capacity=capacity))
         return f"{provider['name']}, {model['name']}, Reasoning {effort or 'Standard'}. {quota}"
 
     def normalize(self, selection):

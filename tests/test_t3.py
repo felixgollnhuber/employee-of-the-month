@@ -3,8 +3,8 @@ import unittest
 from unittest.mock import Mock
 from urllib.error import HTTPError
 
-from telegram_bridge.control import GateError
-from telegram_bridge.t3 import T3Client, T3Delegation, parse_coordinator
+from eotm.control import GateError
+from eotm.t3 import T3Client, T3Delegation, parse_coordinator
 from test_handoff import snapshot
 
 

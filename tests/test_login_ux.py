@@ -6,9 +6,9 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from telegram_bridge.auth import local_key, login
-from telegram_bridge.config import write_profile
-from telegram_bridge.__main__ import main
+from eotm.auth import local_key, login
+from eotm.config import write_profile
+from eotm.__main__ import main
 
 
 class LoginUXTests(unittest.TestCase):
@@ -22,7 +22,7 @@ class LoginUXTests(unittest.TestCase):
         messages = []
         key = local_key(self.profile, lambda _: next(inputs), messages.append)
         self.assertEqual(len(messages), 1)
-        self.assertIn("16 Zeichen", messages[0])
+        self.assertIn("16 characters", messages[0])
         self.assertNotIn("short-secret", messages[0])
         self.assertFalse((self.profile / "database").exists())
         salt = (self.profile / "key-salt").read_bytes()
@@ -37,8 +37,8 @@ class LoginUXTests(unittest.TestCase):
             value = next(inputs)
             if isinstance(value, BaseException): raise value
             return value
-        with patch("telegram_bridge.auth.local_key", side_effect=lambda p: local_key(p, enter, lambda _: None)):
-            with patch("telegram_bridge.auth.TDJson") as native:
+        with patch("eotm.auth.local_key", side_effect=lambda p: local_key(p, enter, lambda _: None)):
+            with patch("eotm.auth.TDJson") as native:
                 with self.assertRaises(KeyboardInterrupt): login(self.profile, Path("/unused"), lambda _: None)
                 native.assert_not_called()
         self.assertFalse((self.profile / "database").exists())
@@ -48,8 +48,8 @@ class LoginUXTests(unittest.TestCase):
         write_profile(self.profile, {"api_id": 123, "api_hash": "0" * 32, "sender_phone": "+12025550123"})
         before = (self.profile / "config.json").read_bytes()
         output = io.StringIO()
-        with patch("sys.argv", ["telegram_bridge", "configure"]), patch("telegram_bridge.__main__.profile_path", return_value=self.profile):
-            with patch("telegram_bridge.__main__.getpass.getpass") as secret, redirect_stdout(output):
+        with patch("sys.argv", ["eotm", "configure"]), patch("eotm.__main__.profile_path", return_value=self.profile):
+            with patch("eotm.__main__.getpass.getpass") as secret, redirect_stdout(output):
                 self.assertEqual(main(), 0)
                 secret.assert_not_called()
         result = json.loads(output.getvalue())
@@ -65,7 +65,7 @@ class LoginUXTests(unittest.TestCase):
         marker.write_text("fixture")
         messages = []
         local_key(self.profile, lambda _: "long-local-fixture-passphrase", messages.append)
-        self.assertIn("bisherige", messages[0])
+        self.assertIn("existing", messages[0])
         self.assertEqual(marker.read_text(), "fixture")
 
 

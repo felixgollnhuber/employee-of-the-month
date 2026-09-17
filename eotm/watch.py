@@ -7,13 +7,14 @@ import tempfile
 import time
 from datetime import datetime
 
-from .application import run_authorized_live_test, instructions_for_handoff, GREETING
-from .config import read_private_json, private_directory
+from .application import run_authorized_live_test, instructions_for_handoff
+from .config import read_private_json, read_live_config, private_directory
 from .control import GateError
 from .handoff import _pending, pending_requests
 from .keychain import cached_database_key
 from .structurer import structurer_for_profile
 from .t3 import T3Client, T3Delegation, now, settle_after_call
+from .i18n import Locale
 
 
 def question_due(snapshot, request_id, delay_seconds, current_time=None):
@@ -50,6 +51,9 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
     if type(call_seconds) is not int or not 1 <= call_seconds <= 180: raise GateError("bounded_call_duration_required")
     if type(question_delay_seconds) is not int or not 0 <= question_delay_seconds <= 3600:
         raise GateError("invalid_question_delay")
+    live_file = profile / "live.json"
+    locale = (Locale.from_config(read_live_config(profile))
+              if live_file.exists() or live_file.is_symlink() else Locale())
     client = T3Client.from_profile(profile)
     shell = client.request("/api/orchestration/shell")
     if not any(p.get("id")==project_id for p in shell.get("projects",[])):
@@ -65,7 +69,7 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
         passphrase=None
         if cached_database_key(profile) is None:
             # Legacy interactive setup until explicit Keychain enrollment.
-            passphrase=secret_input("Lokale Datenbank-Passphrase für den T3-Anrufwächter: ")
+            passphrase=secret_input("Local database passphrase for the T3 call watcher: ")
             if not isinstance(passphrase,str) or len(passphrase)<16: raise GateError("local_passphrase_too_short")
         def legacy_input(_):
             if passphrase is None: raise GateError("automatic_database_unlock_unavailable")
@@ -86,7 +90,7 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
                     if not question_due(snapshot,request_id,question_delay_seconds):continue
                     try:
                         delegation = T3Delegation(client,thread["id"],request_id,emit=emit,
-                                                  structurer=structurer_for_profile(profile))
+                                                  structurer=structurer_for_profile(profile), locale=locale)
                     except GateError as error:
                         if str(error) in ("t3_question_no_longer_pending","t3_thread_unavailable"):
                             continue  # The user answered while we were preparing the call.
@@ -97,7 +101,8 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
                     try:
                         result = run_authorized_live_test(profile,library,authorized=True,max_seconds=call_seconds,
                             secret_input=legacy_input,emit=emit,delegate=delegation,
-                            instructions=instructions_for_handoff(delegation.packet),greeting=GREETING)
+                            instructions=instructions_for_handoff(delegation.packet, locale=locale),
+                            greeting=locale.text("greeting"))
                         attempts[key]["status"] = "answered" if delegation.completed else "open_after_"+result["phase"]
                     except BaseException:
                         attempts[key]["status"] = "attempt_failed_or_interrupted"

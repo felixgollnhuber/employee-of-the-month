@@ -4,7 +4,9 @@ import json
 from pathlib import Path
 import sys
 
-from .config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing, read_private_json, write_target
+from .config import (ConfigError, profile_path, read_profile, write_profile, read_routing,
+                     write_routing, read_private_json, write_target, validate_live_config,
+                     read_live_config, service_root)
 from .control import CallSession
 from .native import offline_native_check
 from .keychain import keychain_configured
@@ -58,7 +60,7 @@ def demo():
 
 
 def main():
-    parser = argparse.ArgumentParser(description="Telegram-Gespräche mit GPT-Live 1 und T3-Rückfragen")
+    parser = argparse.ArgumentParser(description="Telegram voice conversations for T3 Code questions")
     sub = parser.add_subparsers(dest="command", required=True)
     native = sub.add_parser("native-check", help="Load TDLib; no login, network setup or audio")
     native.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
@@ -70,6 +72,16 @@ def main():
     config.add_argument("--sender-file", type=Path, help="Private 0600 JSON containing an already confirmed sender_phone; never a phone number on the command line")
     live_config = sub.add_parser("configure-live", help="Hidden local OpenAI project key input; no API request")
     live_config.add_argument("--profile", default="default")
+    live_config.add_argument("--language", choices=("en", "de"), default="en")
+    live_config.add_argument("--voice", choices=("cedar", "marin"), default="cedar")
+    live_config.add_argument("--user-name")
+    live_config.add_argument("--agent-name", default="Employee of the Month")
+    live_config.add_argument("--structuring-model", default="gpt-5.6-luna")
+    live_config.add_argument("--no-wait-tone", action="store_true")
+    t3_config = sub.add_parser("configure-t3", help="Save a validated T3 origin and private credentials-file path; no API request")
+    t3_config.add_argument("--profile", default="default")
+    t3_config.add_argument("--origin", required=True)
+    t3_config.add_argument("--credentials-file", required=True, type=Path)
     target = sub.add_parser("configure-target", help="Save the confirmed recipient locally; no login, lookup or call")
     target.add_argument("--profile", default="default")
     routing = sub.add_parser("configure-audio", help="Choose exact device UIDs locally; no audio or routing is started")
@@ -110,13 +122,13 @@ def main():
                        help="Wait after a question is created before calling (default: 180)")
     watch.add_argument("--passphrase-dialog", action="store_true")
     watch.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
-    service = sub.add_parser("serve-t3", help="Telegram-Sprachagent für ein oder alle T3-Projekte")
+    service = sub.add_parser("serve-t3", help="Telegram voice agent for one or all T3 projects")
     service.add_argument("--profile", default="default")
     scope = service.add_mutually_exclusive_group(required=True)
     scope.add_argument("--project-id")
     scope.add_argument("--all-projects", action="store_true")
-    service.add_argument("--daemon", action="store_true", help="Dauerhaft bis zum Stoppsignal laufen")
-    service.add_argument("--allow-task-creation", action="store_true", help="Bestätigte Sprachaufträge als neue T3-Threads starten")
+    service.add_argument("--daemon", action="store_true", help="Run until a stop signal instead of a fixed service duration")
+    service.add_argument("--allow-task-creation", action="store_true", help="Start explicitly confirmed voice tasks as new T3 threads")
     service.add_argument("--allow-messages-and-calls", action="store_true")
     service.add_argument("--service-seconds", type=int, default=3600)
     service.add_argument("--seconds", type=int, default=120)
@@ -124,7 +136,14 @@ def main():
     service.add_argument("--question-delay-seconds", type=int, default=180)
     service.add_argument("--passphrase-dialog", action="store_true")
     service.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
-    service.add_argument("--media-runtime", type=Path, help="Separat gebaute native Laufzeit mit eingehender Audiorichtung")
+    service.add_argument("--media-runtime", type=Path, help="Separately built native runtime with incoming call audio")
+    install = sub.add_parser("install-service", help="Stage a fixed private release and LaunchAgent plist; never starts it")
+    install.add_argument("--profile", default="default")
+    install.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    install.add_argument("--python", type=Path, default=Path(sys.executable))
+    install.add_argument("--library", type=Path, default=Path(".build/tdlib/libtdjson.dylib"))
+    install.add_argument("--media-runtime", type=Path,
+                         default=Path(".build/vendor/telegram-ios/bazel-bin/bridge_probe/media_runtime"))
     args = parser.parse_args()
     if args.command == "native-check":
         emit(offline_native_check(args.library))
@@ -138,16 +157,16 @@ def main():
         if (path / "config.json").exists() or (path / "config.json").is_symlink():
             read_profile(path)  # Validate ownership/permissions and fields without printing them.
             emit({"configured": True, "unchanged": True, "login_requested": False,
-                  "next_step": "API-Konfiguration bereits vorhanden. Für die Anmeldung nur python3 -m telegram_bridge login ausführen."})
+                  "next_step": "Configuration already exists. Run eotm login to authenticate the sender account."})
             return 0
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required; do not paste secrets into task chat")
-        print("Nur lokale Speicherung (0600), keine Anmeldung oder SMS-Anforderung.")
+        print("Local owner-only storage only. This command does not log in or request a code.")
         sender = read_private_json(args.sender_file.parent, args.sender_file.name).get("sender_phone") if args.sender_file else None
         data = {
-            "api_id": int(getpass.getpass("Eigene Telegram API-ID: ")),
-            "api_hash": getpass.getpass("Eigener API-Hash: "),
-            "sender_phone": sender or getpass.getpass("Bewusst gewählte Absendernummer (+...): "),
+            "api_id": int(getpass.getpass("Telegram API ID: ")),
+            "api_hash": getpass.getpass("Telegram API hash: "),
+            "sender_phone": sender or getpass.getpass("Dedicated sender phone number (+...): "),
         }
         write_profile(path, data)
         emit({"configured": True, "login_requested": False})
@@ -156,7 +175,7 @@ def main():
             raise ConfigError("Interactive terminal required")
         path = profile_path(args.profile)
         read_profile(path)
-        username = getpass.getpass("Telegram-@Benutzername des persönlichen Empfängerkontos: ").strip()
+        username = getpass.getpass("Public Telegram @username of your personal receiving account: ").strip()
         changed = write_target(path, username)
         emit({"target_configured": True, "unchanged": not changed,
               "login_requested": False, "calls_started": 0})
@@ -169,14 +188,30 @@ def main():
         from .config import write_private_json
         path=profile_path(args.profile)
         if (path/"live.json").exists() or (path/"live.json").is_symlink():
-            read_private_json(path,"live.json")
+            read_live_config(path)
             emit({"live_key_configured":True,"unchanged":True})
         else:
             if not sys.stdin.isatty(): raise ConfigError("Interactive terminal required")
-            key=getpass.getpass("OpenAI-Projekt-API-Key (nur lokal): ")
-            if not key.startswith("sk-") or len(key)<30: raise ConfigError("Invalid OpenAI key format")
-            write_private_json(path,"live.json",{"api_key":key})
+            key=getpass.getpass("OpenAI project API key (stored locally only): ")
+            data = {"api_key": key, "language": args.language, "voice": args.voice,
+                    "agent_name": args.agent_name, "structuring_model": args.structuring_model,
+                    "wait_tone": not args.no_wait_tone}
+            if args.user_name: data["user_name"] = args.user_name
+            write_private_json(path,"live.json",validate_live_config(data))
             emit({"live_key_configured":True,"api_called":False})
+    elif args.command == "configure-t3":
+        from .config import write_private_json
+        from .t3 import validate_connection_files
+        path = profile_path(args.profile)
+        read_profile(path)
+        if (path/"t3.json").exists() or (path/"t3.json").is_symlink():
+            current = read_private_json(path, "t3.json")
+            validate_connection_files(current["origin"], current["credentials_file"])
+            emit({"t3_configured": True, "unchanged": True, "api_called": False})
+        else:
+            config = validate_connection_files(args.origin, args.credentials_file)
+            write_private_json(path, "t3.json", config)
+            emit({"t3_configured": True, "api_called": False})
     elif args.command == "configure-audio":
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required")
@@ -188,8 +223,8 @@ def main():
             ipc.close()
         for index, device in enumerate(choices):
             print(index, device["name"], "input=" + str(device["input"]), "output=" + str(device["output"]))
-        a = int(input("Eingangsgerät für Original-Codex-Ausgabe (Nummer): "))
-        b = int(input("Ausgangsgerät zum Codex-Mikrofon (Nummer): "))
+        a = int(input("Input device for the legacy desktop voice output (number): "))
+        b = int(input("Output device for the legacy desktop voice microphone (number): "))
         if not 0 <= a < len(choices) or not 0 <= b < len(choices) or not choices[a]["input"] or not choices[b]["output"]:
             raise ConfigError("Invalid device direction")
         write_routing(profile_path(args.profile), choices[a]["uid"], choices[b]["uid"])
@@ -207,15 +242,17 @@ def main():
             raise ConfigError("Both T3 thread and request ID are required")
         if args.t3_thread:
             from .t3 import T3Client, T3Delegation
+            from .i18n import Locale
             context = None
             if args.context_file:
                 with args.context_file.open() as stream: context = stream.read(12001)
             from .structurer import structurer_for_profile
+            locale = Locale.from_config(read_live_config(profile_path(args.profile)))
             delegate = T3Delegation(T3Client.from_profile(profile_path(args.profile)), args.t3_thread,
                                     args.t3_request, context=context, emit=emit,
-                                    structurer=structurer_for_profile(profile_path(args.profile)))
-            instructions = instructions_for_handoff(delegate.packet)
-            from .application import GREETING as greeting
+                                    structurer=structurer_for_profile(profile_path(args.profile)), locale=locale)
+            instructions = instructions_for_handoff(delegate.packet, locale=locale)
+            greeting = locale.text("greeting")
         try:
             result = run_authorized_live_test(profile_path(args.profile), args.library,
                 authorized=True, max_seconds=args.seconds,
@@ -276,19 +313,31 @@ def main():
             raise ConfigError("Interactive terminal or local passphrase dialog required")
         remember_database_key(profile_path(args.profile),args.library,
             secret_input=enrollment_dialog if args.passphrase_dialog else getpass.getpass,emit=emit)
+    elif args.command == "install-service":
+        from .daemon import prepare_install
+        profile = profile_path(args.profile)
+        read_profile(profile)
+        staged, release = prepare_install(args.root, service_root(profile), profile,
+                                           args.python, args.library, args.media_runtime)
+        emit({"service_staged": True, "launch_agent_started": False,
+              "plist": str(staged), "release": str(release)})
     elif args.command == "login":
         if not sys.stdin.isatty():
             raise ConfigError("Interactive terminal required for authorized login")
         from .auth import login
-        print("Explizite Telegram-Anmeldung für das konfigurierte Absenderkonto; kann einen Code anfordern. Keine Anrufe.")
+        print("Explicit Telegram login for the configured sender account. This may request a code but never places a call.")
         login(profile_path(args.profile), args.library, emit)
     return 0
 
 
-if __name__ == "__main__":
+def run():
     try:
         sys.exit(main())
     except (Exception, KeyboardInterrupt) as error:
         # Deliberately omit exception messages: native/profile errors may contain PII.
         emit({"error": type(error).__name__, "details": "Check local file permissions, dependencies and command inputs; no secrets logged"})
         sys.exit(1)
+
+
+if __name__ == "__main__":
+    run()

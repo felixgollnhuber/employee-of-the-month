@@ -2,8 +2,8 @@ import base64
 import copy
 import unittest
 
-from telegram_bridge.control import GateError
-from telegram_bridge.descriptor import normalize_ready
+from eotm.control import GateError
+from eotm.descriptor import normalize_ready
 
 
 def fixture_ready():

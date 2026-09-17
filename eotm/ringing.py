@@ -14,7 +14,7 @@ def macos_passphrase(_prompt):
     # The answer stays in this process. Never place it in arguments, logs or files.
     script = '''tell application "System Events"
 activate
-set answer to display dialog "Lokale Datenbank-Passphrase für die freigegebene Telegram-Telefonbrücke eingeben (nicht das Telegram-Passwort)." with title "Codex Phone Bridge" default answer "" with hidden answer buttons {"Abbrechen", "Starten"} default button "Starten" cancel button "Abbrechen" giving up after 180
+set answer to display dialog "Enter the local database passphrase for Employee of the Month, not your Telegram password." with title "Employee of the Month" default answer "" with hidden answer buttons {"Cancel", "Start"} default button "Start" cancel button "Cancel" giving up after 180
 if gave up of answer then error number -128
 return text returned of answer
 end tell'''

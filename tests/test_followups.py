@@ -5,10 +5,10 @@ import threading
 import unittest
 from unittest.mock import Mock
 
-from telegram_bridge.conversations import ConversationStore, Conversations
-from telegram_bridge.control import GateError
-from telegram_bridge.followups import Followups, parse_followup
-from telegram_bridge.service import VoiceConversation
+from eotm.conversations import ConversationStore, Conversations
+from eotm.control import GateError
+from eotm.followups import Followups, parse_followup
+from eotm.service import VoiceConversation
 
 
 TITLE = 'Nachrichten an abgeschlossene T3-Threads senden'

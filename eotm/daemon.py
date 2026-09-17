@@ -11,7 +11,7 @@ import tempfile
 from .config import private_directory
 from .control import GateError
 
-LABEL = 'eu.colibrie.codex-phone-bridge'
+LABEL = 'dev.felixgollnhuber.employee-of-the-month'
 
 
 def atomic_private(path, data):
@@ -36,9 +36,12 @@ def prepare_install(root, service_root, profile, python, library, native_runtime
     for path in (python, library, native_runtime):
         if not Path(path).is_file(): raise GateError('service_dependency_missing')
     private_directory(service_root)
-    files = sorted((root/'telegram_bridge').glob('*.py'))
+    files = sorted((root/'eotm').glob('*.py'))
+    if not files or not any(path.name == '__main__.py' for path in files):
+        raise GateError('service_source_missing')
     digest = hashlib.sha256()
     for path in files: digest.update(path.name.encode()); digest.update(path.read_bytes())
+    digest.update(Path(library).read_bytes())
     digest.update(Path(native_runtime).read_bytes())
     release_id = digest.hexdigest()[:16]
     releases = service_root/'releases'; private_directory(releases)
@@ -46,7 +49,7 @@ def prepare_install(root, service_root, profile, python, library, native_runtime
     if not release.exists():
         temporary = Path(tempfile.mkdtemp(prefix='.release-', dir=releases))
         try:
-            package = temporary/'telegram_bridge'; package.mkdir(mode=0o700)
+            package = temporary/'eotm'; package.mkdir(mode=0o700)
             for path in files: shutil.copy2(path, package/path.name)
             shutil.copy2(library, temporary/'libtdjson.dylib')
             shutil.copy2(native_runtime, temporary/'media_runtime')
@@ -55,7 +58,7 @@ def prepare_install(root, service_root, profile, python, library, native_runtime
             if temporary.exists(): shutil.rmtree(temporary)
     log = service_root/'service.log'
     if not log.exists(): log.touch(mode=0o600)
-    args = [str(Path(python).absolute()), '-u', '-m', 'telegram_bridge', 'serve-t3',
+    args = [str(Path(python).absolute()), '-u', '-m', 'eotm', 'serve-t3',
             '--profile', profile.name, '--all-projects', '--daemon', '--allow-messages-and-calls',
             '--allow-task-creation', '--seconds', '1200', '--question-delay-seconds', '180',
             '--library', str(release/'libtdjson.dylib'), '--media-runtime', str(release/'media_runtime')]

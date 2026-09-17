@@ -6,8 +6,8 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from telegram_bridge.__main__ import main
-from telegram_bridge.config import ConfigError, read_profile, write_profile, write_target, write_private_json
+from eotm.__main__ import main
+from eotm.config import ConfigError, read_profile, write_profile, write_target, write_private_json
 
 
 class TargetSetupTests(unittest.TestCase):
@@ -69,12 +69,12 @@ class TargetSetupTests(unittest.TestCase):
 
     def test_cli_saves_target_without_printing_private_values_or_loading_runtime(self):
         output = io.StringIO()
-        with patch("sys.argv", ["telegram_bridge", "configure-target"]), \
+        with patch("sys.argv", ["eotm", "configure-target"]), \
              patch("sys.stdin.isatty", return_value=True), \
-             patch("telegram_bridge.__main__.profile_path", return_value=self.profile), \
-             patch("telegram_bridge.__main__.getpass.getpass", return_value=" @offline_fixture "), \
-             patch("telegram_bridge.auth.TDJson") as td, \
-             patch("telegram_bridge.runtime.NativeIPC") as runtime, redirect_stdout(output):
+             patch("eotm.__main__.profile_path", return_value=self.profile), \
+             patch("eotm.__main__.getpass.getpass", return_value=" @offline_fixture "), \
+             patch("eotm.auth.TDJson") as td, \
+             patch("eotm.runtime.NativeIPC") as runtime, redirect_stdout(output):
             self.assertEqual(main(), 0)
             td.assert_not_called()
             runtime.assert_not_called()

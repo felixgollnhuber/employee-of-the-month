@@ -58,5 +58,5 @@ class Structurer:
 
 
 def structurer_for_profile(profile):
-    from .config import read_private_json
-    return Structurer.from_config(read_private_json(profile, "live.json"))
+    from .config import read_live_config
+    return Structurer.from_config(read_live_config(profile))
