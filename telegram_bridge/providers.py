@@ -107,8 +107,8 @@ class ProviderAdvisor:
         self.catalog = []
         self.last_refresh = 0
 
-    def refresh(self, force=False):
-        if self.catalog and not force and time.monotonic()-self.last_refresh < 60: return self.catalog
+    def refresh(self, force=False, max_age=60):
+        if self.catalog and not force and time.monotonic()-self.last_refresh < max_age: return self.catalog
         try: self.client.rpc('server.refreshProviders', {'refreshModels': False})
         except GateError: pass
         config = self.client.rpc('server.getConfig')
@@ -151,12 +151,14 @@ class ProviderAdvisor:
                 return {'instanceId': p['instanceId'], 'model': p['models'][0]['slug'], 'options': []}
         raise GateError('no_available_provider_account')
 
-    def options(self):
+    def options(self, max_age=60):
+        """Prompt data may reuse the catalog for a while: reading accounts starts provider processes and
+        takes seconds. normalize, validate and confirm still check fresh data before anything starts."""
         return [{'instanceId': p['instanceId'], 'provider': p['driver'], 'account': p['name'],
                  'remaining_percent': p['remaining_percent'], 'limits': p['limits'],
                  'models': [{'model': m['slug'], 'name': m['name'],
                              'options': (m.get('capabilities') or {}).get('optionDescriptors', [])} for m in p['models']]}
-                for p in self.refresh()]
+                for p in self.refresh(max_age=max_age)]
 
     def validate(self, selection):
         if not isinstance(selection, dict): raise GateError('model_recommendation_required')

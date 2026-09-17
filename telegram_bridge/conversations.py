@@ -73,10 +73,17 @@ class Conversations:
 
     def structure(self, prompt, coordinator):
         """Direct structuring request; coordinator() runs the slow T3 coordination thread as fallback."""
+        started = time.monotonic()
         if self.structurer is not None:
-            try: return self.structurer(prompt)
+            try:
+                result = self.structurer(prompt)
+                self.emit({'structuring_seconds': round(time.monotonic()-started, 2), 'path': 'direct'})
+                return result
             except GateError as error: self.emit({'structurer_fallback': str(error)})
-        return coordinator()
+        started = time.monotonic()
+        result = coordinator()
+        self.emit({'structuring_seconds': round(time.monotonic()-started, 2), 'path': 'coordinator'})
+        return result
 
     SETTLE_RETRY_SECONDS = 30
     SETTLE_GIVE_UP_SECONDS = 1800

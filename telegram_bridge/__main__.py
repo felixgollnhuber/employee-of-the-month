@@ -202,7 +202,7 @@ def main():
         from .application import run_authorized_live_test, instructions_for_handoff
         from .ringing import macos_passphrase
         delegate = None
-        instructions = None
+        instructions = greeting = None
         if bool(args.t3_thread) != bool(args.t3_request) or (args.context_file and not args.t3_thread):
             raise ConfigError("Both T3 thread and request ID are required")
         if args.t3_thread:
@@ -215,11 +215,12 @@ def main():
                                     args.t3_request, context=context, emit=emit,
                                     structurer=structurer_for_profile(profile_path(args.profile)))
             instructions = instructions_for_handoff(delegate.packet)
+            from .application import GREETING as greeting
         try:
             result = run_authorized_live_test(profile_path(args.profile), args.library,
                 authorized=True, max_seconds=args.seconds,
                 secret_input=macos_passphrase if args.passphrase_dialog else None, emit=emit,
-                delegate=delegate, instructions=instructions)
+                delegate=delegate, instructions=instructions, greeting=greeting)
         finally:
             if delegate is not None:
                 from .t3 import settle_after_call

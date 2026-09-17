@@ -10,6 +10,11 @@ from .live import LiveCallLoop
 from .runtime import NativeMedia, DEFAULT_RUNTIME
 
 
+# Instructions alone never make the live model speak first. Sent once after session.started.
+GREETING = ("Die Verbindung steht. Begrüße Felix jetzt sofort auf Deutsch, ohne auf seine erste Aussage zu warten, "
+            "so wie in deinen Anweisungen beschrieben. Sag in einem Satz, worum es geht, und höre dann zu.")
+
+
 def instructions_for_handoff(packet):
     import json
     return (
@@ -30,7 +35,7 @@ def instructions_for_handoff(packet):
 
 def run_authorized_live_test(profile, library, *, authorized=False, max_seconds=120,
                              secret_input=None, emit=lambda status: None, delegate=None,
-                             instructions=None):
+                             instructions=None, greeting=None):
     if authorized is not True:
         raise GateError("explicit_live_call_authorization_required")
     if type(max_seconds) is not int or not 1 <= max_seconds <= 180:
@@ -52,7 +57,8 @@ def run_authorized_live_test(profile, library, *, authorized=False, max_seconds=
         "Behaupte keine ausgeführten Projektaktionen. Wenn Felix auflegen möchte, verabschiede dich kurz. Warte zunächst auf Felix."
     )
     media = LivePcmMedia(key, instructions=instructions, authorized=True,
-                         max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice)
+                         max_seconds=max_seconds, delegate=delegate, emit=emit, voice=voice,
+                         greeting=greeting, wait_tone=delegate is not None and live_config.get("wait_tone", True) is not False)
     if delegate is not None and hasattr(delegate, "cancelled"):
         delegate.cancelled = lambda: media.stopping or media.voice.stopping.is_set()
         delegate.revision = lambda: media.voice.input_revision
