@@ -84,6 +84,42 @@ class T3DialogTests(unittest.TestCase):
         self.assertFalse(client.followups)
         self.assertTrue(bridge.completed)
 
+    def test_structurer_answers_without_creating_a_coordinator_thread(self):
+        client=DialogClient();client.create_coordinator=lambda _:self.fail('coordinator thread created')
+        prompts=[]
+        def structurer(prompt):
+            prompts.append(prompt);return reply('decision','PDF','Ja, PDF.')
+        bridge=T3Delegation(client,'t3-thread','request-1',context='Fixture',structurer=structurer)
+        bridge([{'role':'assistant','text':'PDF für den Vorstand?'},{'role':'user','text':'Ja, PDF.'}])
+        self.assertEqual(client.ask_answers,[('request-1',{'choice':'PDF'})])
+        self.assertTrue(bridge.completed)
+        self.assertIsNone(bridge.coordinator_id)
+        self.assertEqual(client.prompts,[])
+        self.assertIn('Ja, PDF.',prompts[0])
+
+    def test_structurer_still_needs_the_quote_in_the_latest_user_statement(self):
+        client=DialogClient()
+        bridge=T3Delegation(client,'t3-thread','request-1',context='Fixture',
+            structurer=lambda _:reply('decision','PDF','Ja, PDF.'))
+        bridge([{'role':'user','text':'Nein, lieber CSV.'}])
+        self.assertEqual(client.ask_answers,[])
+        self.assertFalse(bridge.submitted)
+
+    def test_failing_structurer_falls_back_to_the_coordinator_thread(self):
+        client=DialogClient();client.responses=[reply('decision','PDF','Ja, PDF.')]
+        events=[]
+        def structurer(_):raise GateError('structurer_http_500')
+        bridge=T3Delegation(client,'t3-thread','request-1',context='Fixture',emit=events.append,structurer=structurer)
+        bridge([{'role':'user','text':'Ja, PDF.'}])
+        self.assertEqual(client.ask_answers,[('request-1',{'choice':'PDF'})])
+        self.assertEqual(bridge.coordinator_id,'coordinator')
+        self.assertIn({'structurer_fallback':'structurer_http_500'},events)
+
+    def test_structurer_is_not_part_of_the_durable_state(self):
+        bridge=T3Delegation(DialogClient(),'t3-thread','request-1',context='Fixture',structurer=lambda _:'{}')
+        self.assertNotIn('structurer',json.dumps(bridge.state()))
+        self.assertIsNone(T3Delegation.restore(DialogClient(),bridge.state()).structurer)
+
     def test_missing_intent_cannot_turn_a_query_into_a_decision(self):
         ambiguous={'reply':'Verstanden','answer':{'confirmed':True,'confirmation_quote':'Ja','answers':{'choice':'Bitte erst klären'}}}
         with self.assertRaisesRegex(GateError,'intent'):

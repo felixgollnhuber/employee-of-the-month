@@ -210,8 +210,10 @@ def main():
             context = None
             if args.context_file:
                 with args.context_file.open() as stream: context = stream.read(12001)
+            from .structurer import structurer_for_profile
             delegate = T3Delegation(T3Client.from_profile(profile_path(args.profile)), args.t3_thread,
-                                    args.t3_request, context=context, emit=emit)
+                                    args.t3_request, context=context, emit=emit,
+                                    structurer=structurer_for_profile(profile_path(args.profile)))
             instructions = instructions_for_handoff(delegate.packet)
         try:
             result = run_authorized_live_test(profile_path(args.profile), args.library,

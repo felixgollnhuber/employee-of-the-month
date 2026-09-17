@@ -38,6 +38,16 @@ class ConversationFixture:
         self.identifier = self.operation['id']
         self.addCleanup(self.temp.cleanup)
 
+    def direct(self, *responses):
+        """Structurer fixture: the T3 coordination thread must stay unused."""
+        queue, prompts = list(responses), []
+        def structurer(prompt):
+            prompts.append(prompt)
+            return queue.pop(0)
+        self.c.structurer = structurer
+        self.client.create_coordinator = lambda _: self.fail('coordinator thread created')
+        return prompts
+
     def message(self, text, mid=55, **fields):
         return {'id': mid, 'chat_id': 123, 'is_outgoing': False, 'date': int(time.time()),
                 'sender_id': {'@type': 'messageSenderUser', 'user_id': 123},
@@ -50,6 +60,23 @@ class ConversationFixture:
 
 
 class ConversationTests(ConversationFixture, unittest.TestCase):
+    def test_status_brief_is_compact_and_names_open_questions_without_private_history(self):
+        brief = self.c.status_brief()
+        self.assertIn('Fixture task', brief)
+        self.assertIn('Welche Variante?', brief)
+        self.assertIn(self.identifier, brief)
+        self.assertNotIn('PRIVATE_HISTORY', brief)
+        self.assertLessEqual(len(brief), 6000)
+
+    def test_text_answer_and_text_status_use_the_structurer(self):
+        self.direct(reply('decision', 'PDF', 'PDF'), '{"reply":"Der Bericht ist fertig."}')
+        self.c.message(self.message('PDF'))
+        self.assertEqual(self.operation['status'], 'completed')
+        self.c.message(self.message('Wie ist der Status?', 56))
+        self.assertIn('Der Bericht ist fertig.', self.sent[-1]['input_message_content']['text']['text'])
+        self.assertNotIn('status_coordinator', self.store.data)
+        self.assertEqual(self.client.prompts, [])
+
     def test_no_answer_reject_hangup_network_loss_each_get_one_message(self):
         self.c.reserve_attempt()
         for reason in ('startup_timeout', 'remote_end', 'caller_requested', 'media_failed', 'service_restart'):
@@ -306,6 +333,92 @@ class ServiceTests(ConversationFixture, unittest.TestCase):
         fresh = VoiceConversation(self.c, self.s.lock)
         self.assertIn('fertig', fresh([{'role': 'user', 'text': 'Wie läuft es?'}]))
         self.assertEqual(len(self.client.ask_answers), 1)
+
+    def test_voice_status_and_answer_use_the_structurer_without_coordinator_threads(self):
+        prompts = self.direct('{"reply":"Es geht um den Bericht. PDF oder CSV?","operation_id":"' + self.identifier + '"}',
+                              reply('decision', 'PDF', 'Ja PDF'))
+        voice = VoiceConversation(self.c, self.s.lock)
+        self.assertIn('PDF oder CSV', voice([{'role': 'user', 'text': 'Ich rufe wegen des Berichts zurück.'}]))
+        self.assertEqual(voice.operation_id, self.identifier)
+        voice([{'role': 'user', 'text': 'Ja PDF'}])
+        self.assertTrue(self.c.delegate(self.operation).completed)
+        self.assertEqual(self.client.ask_answers, [('request-1', {'choice': 'PDF'})])
+        self.assertEqual(len(prompts), 2)
+        self.assertEqual(self.client.prompts, [])
+        self.assertIsNone(voice.coordinator_id)
+        self.assertIsNone(self.c.delegate(self.operation).coordinator_id)
+
+    def test_failing_structurer_falls_back_to_the_status_coordinator(self):
+        tried = []
+        def structurer(prompt):
+            tried.append(prompt)
+            raise GateError('structurer_http_500')
+        self.c.structurer = structurer
+        self.client.responses = ['{"reply":"Der Bericht ist fertig.","operation_id":null}']
+        voice = VoiceConversation(self.c, self.s.lock)
+        self.assertIn('fertig', voice([{'role': 'user', 'text': 'Wie läuft es?'}]))
+        self.assertEqual(voice.coordinator_id, 'coordinator')
+        self.assertEqual(len(tried), 1)
+
+    def test_call_start_prefetches_status_into_the_voice_instructions(self):
+        self.media.extend_instructions = Mock(return_value=True)
+        self.s.event(self.incoming())
+        self.s.tick()
+        self.drain()
+        self.assertIsNotNone(self.s.session)
+        text = self.media.extend_instructions.call_args.args[0]
+        self.assertIn('Fixture task', text)
+        self.assertIn('Welche Variante?', text)
+
+    def test_failed_status_prefetch_never_fails_the_call(self):
+        events = []
+        self.s.emit = events.append
+        self.media.extend_instructions = Mock(return_value=True)
+        self.s.event(self.incoming())
+        self.s.tick()
+        self.client.request = Mock(side_effect=GateError('t3_connection_or_response_failed'))
+        self.drain()
+        self.assertIsNotNone(self.s.session)
+        self.media.extend_instructions.assert_not_called()
+        self.assertIn({'voice_context_prefetch_failed': 't3_connection_or_response_failed'}, events)
+        self.assertIsNone(self.s.backend_error)
+
+    def test_unexpected_t3_data_during_prefetch_never_reaches_the_service_loop(self):
+        events = []
+        self.s.emit = events.append
+        self.media.extend_instructions = Mock(return_value=True)
+        self.c.status_brief = Mock(side_effect=KeyError('title'))
+        self.s.event(self.incoming())
+        self.s.tick()
+        self.drain()
+        self.assertIsNotNone(self.s.session)
+        self.media.extend_instructions.assert_not_called()
+        self.assertIn({'voice_context_prefetch_failed': 'KeyError'}, events)
+
+    def test_status_snapshots_are_reused_within_one_call_but_not_for_answers(self):
+        self.direct('{"reply":"Läuft.","operation_id":null}', '{"reply":"Weiter so.","operation_id":null}')
+        self.c.discover = Mock(return_value=[])
+        self.c.open_operations = Mock(return_value=[])
+        fetched = []
+        original = self.client.snapshot
+        self.client.snapshot = lambda identifier: (fetched.append(identifier), original(identifier))[1]
+        voice = VoiceConversation(self.c, self.s.lock)
+        voice([{'role': 'user', 'text': 'Wie läuft es?'}])
+        first = len(fetched)
+        voice([{'role': 'user', 'text': 'Wie läuft es?'}, {'role': 'assistant', 'text': 'Läuft.'}, {'role': 'user', 'text': 'Und sonst?'}])
+        self.assertGreater(first, 0)
+        self.assertEqual(len(fetched), first)
+
+    def test_voice_rules_answer_from_context_and_delegate_only_actions(self):
+        from telegram_bridge.service import voice_instructions
+        from telegram_bridge.application import instructions_for_handoff
+        for text in (voice_instructions(None, {'previous_calls': []}),
+                     voice_instructions({'questions': []}, {'previous_calls': []}), instructions_for_handoff({'questions': []})):
+            self.assertNotIn('Delegiere jede', text)
+            self.assertNotIn('Delegiere die Einordnung jeder', text)
+            self.assertNotIn('ausschließlich vom Backend', text)
+            self.assertIn('ohne zu delegieren', text)
+            self.assertIn('erst nach', text)
 
     def test_service_authorization_fails_before_any_runtime_access(self):
         with self.assertRaisesRegex(GateError, 'authorization'):

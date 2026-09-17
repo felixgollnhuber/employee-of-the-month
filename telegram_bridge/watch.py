@@ -12,6 +12,7 @@ from .config import read_private_json, private_directory
 from .control import GateError
 from .handoff import _pending, pending_requests
 from .keychain import cached_database_key
+from .structurer import structurer_for_profile
 from .t3 import T3Client, T3Delegation, now, settle_after_call
 
 
@@ -84,7 +85,8 @@ def watch_project(profile, library, project_id, *, authorized=False, secret_inpu
                     if key in attempts: continue
                     if not question_due(snapshot,request_id,question_delay_seconds):continue
                     try:
-                        delegation = T3Delegation(client,thread["id"],request_id,emit=emit)
+                        delegation = T3Delegation(client,thread["id"],request_id,emit=emit,
+                                                  structurer=structurer_for_profile(profile))
                     except GateError as error:
                         if str(error) in ("t3_question_no_longer_pending","t3_thread_unavailable"):
                             continue  # The user answered while we were preparing the call.

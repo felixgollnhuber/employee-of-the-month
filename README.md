@@ -1,6 +1,6 @@
 # Mitarbeiter des Monats - Codex Phone Bridge
 
-Ein lokaler Prototyp, der bei Rückfragen aus T3 Code über Telegram anrufen und mit **GPT-Live 1** sprechen kann. Die Arbeitsaufgaben bleiben in T3. Ein separater Gesprächs-Thread ordnet die Telefonantwort ein und gibt sie an die ursprüngliche Rückfrage zurück.
+Ein lokaler Prototyp, der bei Rückfragen aus T3 Code über Telegram anrufen und mit **GPT-Live 1** sprechen kann. Die Arbeitsaufgaben bleiben in T3. Die Brücke ordnet die Telefonantwort mit einem einzelnen Strukturierungs-Aufruf ein und gibt sie an die ursprüngliche Rückfrage zurück. Der frühere separate Gesprächs-Thread ist nur noch Rückfallweg; siehe [direkter Gesprächspfad](docs/direct-voice-path.md). Dieser Umbau vom 17. September 2026 ist offline getestet, aber noch nicht im laufenden Dienst aktiviert.
 
 ## Stand: 11. September 2026
 
@@ -107,11 +107,12 @@ Der Wächter prüft derzeit per begrenzten HTTP-Abfragen. Er ist noch kein insta
 
 ## Kosten und Zugang
 
-GPT-Live 1 benötigt einen eigenen OpenAI-API-Key und wird separat vom ChatGPT-Abo abgerechnet: derzeit 0,05 US-Dollar pro aktiver Sitzungsminute, sekundengenau. Die Gesprächskoordination läuft über den bestehenden T3-Providerzugang. Der Code konfiguriert keine zusätzlichen Responses-API-Modelle. [OpenAI-Preise](https://developers.openai.com/api/docs/pricing), [Client-Delegation](https://developers.openai.com/api/docs/guides/live-delegation).
+GPT-Live 1 benötigt einen eigenen OpenAI-API-Key und wird separat vom ChatGPT-Abo abgerechnet: derzeit 0,05 US-Dollar pro aktiver Sitzungsminute, sekundengenau. Die Einordnung der Gesprächsantworten läuft seit dem 17. September 2026 über einen direkten Responses-API-Aufruf mit `gpt-5.6-luna` und demselben Projekt-Key; das kostet Bruchteile eines Cents pro Gespräch und ersetzt die frühere Festlegung auf keine zusätzlichen API-Modelle. Mit `"structuring_model": null` in `live.json` läuft die Koordination wieder ausschließlich über den bestehenden T3-Providerzugang. [OpenAI-Preise](https://developers.openai.com/api/docs/pricing), [Client-Delegation](https://developers.openai.com/api/docs/guides/live-delegation).
 
 ## Weitere Dokumentation
 
 - [Aktiver dauerhafter Sprachagent: alle Projekte, neue Feature-Threads und Modellwahl](docs/all-projects-service.md).
+- [Direkter Gesprächspfad ohne Koordinator-Thread: Ablauf, Kosten, Nachweise](docs/direct-voice-path.md).
 
 - [Telegram-Folgedialoge, Rückrufe und Statusanrufe mit serve-t3](docs/telegram-service.md).
 - [T3-Integration und Abo-/API-Entscheidung](docs/t3-voice-integration.md).
