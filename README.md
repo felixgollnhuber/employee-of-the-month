@@ -90,6 +90,52 @@ The agent in T3 needs no special setup. From its point of view, you simply answe
 | An **OpenAI API key** with access to GPT-Live 1 | Voice conversation and answer structuring. Billed separately from ChatGPT plans. |
 | Python 3.11+, Xcode Command Line Tools, `cmake`, `gperf`, OpenSSL 3 | Building TDLib and the media runtime. |
 
+## Guided setup with a coding agent
+
+The setup is a long native build plus several private files, so it is a good fit for a coding
+agent. Clone the repository, open it with Claude Code, Codex, Cursor or whatever you use, and
+paste the prompt below. The agent runs the builds and checks for you, and hands the commands
+that touch your credentials back to you.
+
+```sh
+git clone https://github.com/felixgollnhuber/employee-of-the-month.git
+cd employee-of-the-month
+```
+
+**Copy this prompt into your agent:**
+
+```text
+Help me set up Employee of the Month on this Mac. The repository is already cloned and is your
+working directory.
+
+First read README.md, docs/getting-started.md, docs/configuration.md and docs/troubleshooting.md.
+Then take me through the setup one step at a time.
+
+How to work with me:
+- Before each step, say in one or two sentences what it does and what it will change, then wait
+  for my go-ahead.
+- Run the build and verification commands yourself: `make check`, `make telegram-native`,
+  `make telegram-runtime`, `make live-deps`, `make keychain-helper`. Show me the real output.
+  Never report a step as done that you did not actually run.
+- Do NOT run `eotm configure`, `eotm configure-target`, `eotm configure-live`,
+  `eotm configure-t3`, `eotm login` or `eotm remember-login` yourself. Print the exact command
+  and let me run it in my own terminal, so my API keys, phone number and login codes never pass
+  through you. Remind me to run `source .build/live-venv/bin/activate` first, otherwise `eotm`
+  is not on my PATH. Never ask me to paste a secret into this chat, a file in the repository or
+  a command line.
+- After configuration, run `eotm preflight` and explain every field that is not ready yet.
+- Never place a call, send a Telegram message or start the service without asking me first.
+  `eotm voice-test --allow-call` really rings my phone and starts billed GPT-Live minutes.
+- If something fails, check docs/troubleshooting.md, tell me what actually went wrong, and stop
+  instead of guessing.
+
+Start by checking my prerequisites and telling me what is missing: Apple Silicon, Python 3.11+,
+Xcode Command Line Tools, `cmake`, `gperf`, `openssl@3`, a reachable T3 Code instance, and two
+separate Telegram accounts.
+```
+
+Prefer to do it yourself? The next section is the same path, written out.
+
 ## Setup tutorial
 
 This is the complete path from a fresh clone to a first bounded call. Nothing starts automatically, and the offline check never opens the network, audio or a Telegram session.
