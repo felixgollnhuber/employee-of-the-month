@@ -4,6 +4,9 @@ All notable changes will be documented in this file. The project follows [Semant
 
 ## Unreleased
 
+- Support T3 orchestration V2 HTTP reads, bounded thread projections and WebSocket commands while retaining durable conversation IDs and confirmation gates.
+- Reject HTML API responses, protocol changes and mismatched answer readback; preserve encoded native thread IDs.
+- Skip completed and stale operations during restart recovery so retired V1 thread IDs cannot block the service.
 - Reject malformed private JSON and credential field types without crashing the offline preflight.
 - Reject symlink T3 credentials and named pipes before reading their contents.
 - Test Python 3.11 and 3.14 in CI with installed package dependencies and a CLI smoke test outside the source tree.

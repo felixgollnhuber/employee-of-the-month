@@ -1,7 +1,7 @@
 """Bind one spoken answer to one pending T3 question, independently of voice transport.
 
 Pure preparation only. The caller reads snapshots through T3's HTTP API and
-dispatches the returned command there. Never edit T3's database or resume its
+dispatches through the versioned T3 client. Never edit T3's database or resume its
 provider session in a second runtime.
 """
 from dataclasses import dataclass

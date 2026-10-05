@@ -189,6 +189,19 @@ class ConversationTests(ConversationFixture, unittest.TestCase):
         with self.assertRaisesRegex(GateError, 'scope_mismatch'):
             ConversationStore(self.temp.name, 'other-project', 123)
 
+    def test_restart_does_not_recover_closed_operations_from_retired_thread_ids(self):
+        self.c.reserve_attempt()
+        for status in ('completed', 'stale'):
+            with self.subTest(status=status):
+                self.operation['status'] = status
+                self.store.save()
+                self.restart()
+                self.client.snapshot = Mock(side_effect=GateError('t3_http_404'))
+                self.c.recover()
+                self.client.snapshot.assert_not_called()
+                self.assertEqual(self.operation['status'], status)
+                self.assertFalse(self.sent)
+
     def test_each_callback_has_one_followup_and_keeps_operation_identity(self):
         self.c.reserve_attempt()
         self.c.finish_attempt(self.identifier, {'phase': 'ended', 'call_id': 7})
