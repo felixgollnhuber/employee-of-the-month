@@ -18,4 +18,5 @@ Initial public preview for macOS on Apple Silicon.
 - Added English and German conversation configuration.
 - Added packaging metadata, CI, contribution guidance, a security policy and issue templates.
 - Rewrote the public documentation for installation, configuration, operation, architecture and troubleshooting.
+- Added a copy-paste prompt to the README for setting the bridge up interactively with a coding agent.
 - Preserved existing private profiles and installed services through explicit legacy-path compatibility.
