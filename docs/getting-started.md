@@ -58,10 +58,16 @@ Private files are stored outside the repository in an owner-only directory. See 
 Employee of the Month needs a scoped T3 bearer token for thread snapshots and orchestration commands. With the T3 CLI available:
 
 ```sh
-t3 auth session issue --json --label employee-of-the-month
+mkdir -p "$HOME/.t3"
+umask 077
+t3 auth session issue --json --label employee-of-the-month > "$HOME/.t3/eotm-session.json"
+
+eotm configure-t3 \
+  --origin http://127.0.0.1:3773 \
+  --credentials-file "$HOME/.t3/eotm-session.json"
 ```
 
-Store the returned token in an owner-only JSON file and reference it from the profile's `t3.json`. Do not paste the token into an issue, shell history or task chat. The exact file schema is documented in [configuration.md](configuration.md#t3json).
+The redirection stores the token in an owner-only JSON file without printing it. `configure-t3` validates that file and saves its path, without contacting T3. Use a regular file, not a symlink. Do not paste the token into an issue, shell history or task chat. The exact file schema is documented in [configuration.md](configuration.md#t3json).
 
 The local T3 server normally listens on `http://127.0.0.1:3773`. Remote origins must use HTTPS. Redirects are rejected.
 

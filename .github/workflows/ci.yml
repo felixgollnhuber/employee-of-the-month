@@ -13,14 +13,22 @@ jobs:
     # The bridge targets Apple Silicon macOS. These checks never log in,
     # open the network, touch audio devices or place calls.
     runs-on: macos-15
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.12"
+          python-version: ${{ matrix.python-version }}
+      # Dependency installation uses the network. The check below remains offline.
+      - name: Install package and pinned runtime dependencies
+        run: python -m pip install .
       - name: Offline checks and unit tests
         run: make check
-      - name: Package and CLI smoke test
+      - name: Installed package and dependency smoke test
         run: |
-          python -m pip install --no-deps -e .
+          cd "$RUNNER_TEMP"
+          python -c "from websockets.asyncio.client import connect; from websockets.sync.client import connect"
           eotm --help >/dev/null

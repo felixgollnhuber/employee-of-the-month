@@ -25,10 +25,12 @@ Building the Telegram runtime (`make telegram-runtime`) is only needed to work o
 
 ## Tests
 
-- Tests live in `tests/` and use the standard library `unittest`. Run one file with `python3 -m unittest tests/test_followups.py`.
+- Tests live in `tests/` and use the standard library `unittest`. Run one file with `python3 -m unittest discover -s tests -p 'test_followups.py'` so shared test fixtures are available.
 - Use the existing fakes for TDLib, T3 and the live voice socket instead of mocking the network.
 - Bug fixes should come with a test that fails before the fix.
 - Language heuristics (confirmation, cancel, hang-up and follow-up phrases) need tests for every supported language they touch.
+
+CI runs the offline gate on Python 3.11 and 3.14, the oldest and newest supported versions. It installs the package and its pinned dependencies first, then checks the installed CLI outside the source directory. Dependency installation requires network access; `make check` still does not.
 
 ## Code style
 
