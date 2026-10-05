@@ -3,12 +3,15 @@ import io
 import os
 from pathlib import Path
 import tempfile
+import subprocess
+import sys
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
 
 from eotm.__main__ import main
 from eotm.config import validate_live_config, profile_path, write_profile
+from eotm.control import GateError
 from eotm.followups import parse_followup
 from eotm.i18n import Locale
 from eotm.live_voice import wants_hangup
@@ -70,6 +73,44 @@ class SetupTests(unittest.TestCase):
             os.chmod(credential, 0o644)
             with self.assertRaisesRegex(Exception, 'unsafe_t3_credentials_file'):
                 validate_connection_files('http://127.0.0.1:3773', credential)
+
+    def test_t3_symlink_credentials_are_rejected_before_reading(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / 'session.json'
+            credential.write_text(json.dumps({'token': 'PRIVATE'}))
+            credential.chmod(0o600)
+            link = Path(directory) / 'linked-session.json'
+            link.symlink_to(credential)
+            with self.assertRaises((OSError, GateError)):
+                validate_connection_files('http://127.0.0.1:3773', link)
+
+    def test_t3_wrong_connection_field_types_are_gate_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / 'session.json'
+            credential.write_text(json.dumps({'token': 'PRIVATE'}))
+            credential.chmod(0o600)
+            with self.assertRaises(GateError):
+                validate_connection_files([], credential)
+            with self.assertRaises(GateError):
+                validate_connection_files('http://127.0.0.1:3773', [])
+
+    def test_t3_fifo_credentials_are_rejected_without_waiting_for_a_writer(self):
+        with tempfile.TemporaryDirectory() as directory:
+            credential = Path(directory) / 'session.json'
+            os.mkfifo(credential, 0o600)
+            script = """
+import sys
+from eotm.control import GateError
+from eotm.t3 import validate_connection_files
+try:
+    validate_connection_files('http://127.0.0.1:3773', sys.argv[1])
+except GateError as error:
+    sys.exit(0 if str(error) == 'unsafe_t3_credentials_file' else 1)
+sys.exit(1)
+"""
+            result = subprocess.run([sys.executable, '-c', script, str(credential)],
+                                    capture_output=True, timeout=3)
+            self.assertEqual(result.returncode, 0)
 
     def test_configure_t3_writes_only_the_private_file_reference(self):
         with tempfile.TemporaryDirectory() as directory:

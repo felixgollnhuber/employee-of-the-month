@@ -40,7 +40,12 @@
 - Confirm T3 is running and the `origin` in `t3.json` is correct.
 - Issue a fresh scoped token with `t3 auth session issue` if the session expired or was revoked.
 - Remote T3 endpoints require HTTPS. Redirects and origins with embedded user information are rejected.
+- The credentials file must be an owner-only regular file, not a symlink. Point `configure-t3` directly at the private session file.
 - A transport receipt only proves command acceptance. The service waits for thread-state readback before claiming completion.
+
+## `preflight` reports invalid configuration
+
+Private configuration files must contain JSON objects with the documented field types. Lists, scalar JSON values and malformed fields are rejected and reported as missing prerequisites by `preflight`. Named pipes are rejected without waiting for a writer. Inspect and correct the files in your own terminal, keeping their owner-only permissions and secret values out of task chats and issue reports. See [configuration.md](configuration.md) for the schemas.
 
 ## No automatic call happens
 

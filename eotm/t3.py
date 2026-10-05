@@ -85,9 +85,13 @@ class NoRedirect(urllib.request.HTTPRedirectHandler):
 
 def validate_connection_files(origin, credentials_file, *, include_token=False):
     """Validate local T3 connection inputs without opening the network."""
-    credential = Path(credentials_file).expanduser().resolve()
-    fd = os.open(credential, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd) as stream:
+    if not isinstance(credentials_file, (str, os.PathLike)):
+        raise GateError("invalid_t3_credentials_file")
+    # Canonicalize the parent, leaving the final symlink for O_NOFOLLOW to reject.
+    credential = Path(credentials_file).expanduser()
+    credential = credential.parent.resolve() / credential.name
+    fd = os.open(credential, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, encoding="utf-8") as stream:
         info = os.fstat(stream.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
                 or info.st_mode & 0o077 or info.st_size > 8192):
@@ -102,6 +106,8 @@ def validate_connection_files(origin, credentials_file, *, include_token=False):
 
 class T3Client:
     def __init__(self, origin, token, *, opener=None):
+        if not isinstance(origin, str):
+            raise GateError("invalid_t3_origin")
         parsed = urllib.parse.urlsplit(origin)
         if parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
             raise GateError("invalid_t3_origin")

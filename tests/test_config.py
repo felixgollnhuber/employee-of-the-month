@@ -1,9 +1,12 @@
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 
-from eotm.config import ConfigError, profile_path, read_profile, write_profile, read_routing, write_routing
+from eotm.config import (ConfigError, profile_path, read_private_json, read_profile,
+                         write_private_json, write_profile, read_routing, write_routing)
 
 
 class ConfigTests(unittest.TestCase):
@@ -60,6 +63,47 @@ class ConfigTests(unittest.TestCase):
         data = {key: value for key, value in self.fixture.items() if key != "target_username"}
         write_profile(self.path, data)
         self.assertEqual(read_profile(self.path), data)
+
+    def test_private_json_requires_an_object(self):
+        for value in ([], None, "fixture", 123, True):
+            with self.subTest(value=value):
+                write_private_json(self.path, "invalid.json", value)
+                try:
+                    with self.assertRaises(ConfigError):
+                        read_private_json(self.path, "invalid.json")
+                finally:
+                    (self.path / "invalid.json").unlink()
+
+    def test_wrong_credential_field_types_are_configuration_errors(self):
+        for field in ("api_hash", "sender_phone", "target_username"):
+            for value in (123, [], {}):
+                with self.subTest(field=field, value=value):
+                    with self.assertRaises(ConfigError):
+                        write_profile(self.path, {**self.fixture, field: value})
+                    self.assertFalse(self.path.exists())
+
+    def test_wrong_target_field_type_is_a_configuration_error(self):
+        write_profile(self.path, self.fixture)
+        write_private_json(self.path, "target.json", {"target_username": []})
+        with self.assertRaises(ConfigError):
+            read_profile(self.path)
+
+    def test_private_fifo_is_rejected_without_waiting_for_a_writer(self):
+        self.path.mkdir(mode=0o700)
+        os.mkfifo(self.path / "config.json", 0o600)
+        script = """
+from pathlib import Path
+import sys
+from eotm.config import ConfigError, read_private_json
+try:
+    read_private_json(Path(sys.argv[1]), 'config.json')
+except ConfigError:
+    sys.exit(0)
+sys.exit(1)
+"""
+        result = subprocess.run([sys.executable, "-c", script, str(self.path)],
+                                capture_output=True, timeout=3)
+        self.assertEqual(result.returncode, 0)
 
 
 if __name__ == "__main__":

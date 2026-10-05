@@ -30,14 +30,19 @@ def service_root(profile):
 
 
 def validate(data):
+    if not isinstance(data, dict):
+        raise ConfigError("Invalid account configuration")
     if type(data.get("api_id")) is not int or not 0 < data["api_id"] < 2**31:
         raise ConfigError("API ID must be a positive integer")
-    if not re.fullmatch(r"[0-9a-fA-F]{32}", data.get("api_hash", "")):
+    api_hash = data.get("api_hash")
+    if not isinstance(api_hash, str) or not re.fullmatch(r"[0-9a-fA-F]{32}", api_hash):
         raise ConfigError("API hash must contain 32 hexadecimal characters")
-    if not re.fullmatch(r"\+[1-9][0-9]{6,14}", data.get("sender_phone", "")):
+    sender = data.get("sender_phone")
+    if not isinstance(sender, str) or not re.fullmatch(r"\+[1-9][0-9]{6,14}", sender):
         raise ConfigError("Sender requires an explicitly chosen E.164 phone number")
     target = data.get("target_username")
-    if target is not None and not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target):
+    if target is not None and (not isinstance(target, str)
+                               or not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target)):
         raise ConfigError("Target requires an explicitly chosen Telegram @username")
     result = {key: data[key] for key in ("api_id", "api_hash", "sender_phone")}
     if target is not None:
@@ -46,6 +51,8 @@ def validate(data):
 
 
 def require_target(data):
+    if not isinstance(data, dict):
+        raise ConfigError("Invalid target configuration")
     target = data.get("target_username")
     if not isinstance(target, str) or not re.fullmatch(r"@[A-Za-z][A-Za-z0-9_]{3,31}", target):
         raise ConfigError("Confirmed call target is required before dialing")
@@ -102,14 +109,21 @@ def read_private_json(path, name, *, max_bytes=8192):
     if not path.exists():
         raise ConfigError("No local profile configured")
     private_directory(path)
-    fd = os.open(path / name, os.O_RDONLY | os.O_NOFOLLOW)
-    with os.fdopen(fd) as stream:
+    # Nonblocking open lets the regular-file check reject FIFOs without waiting for a writer.
+    fd = os.open(path / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+    with os.fdopen(fd, encoding="utf-8") as stream:
         info = os.fstat(stream.fileno())
         if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077:
             raise ConfigError("Configuration must be an owner-only regular file (0600)")
         if info.st_size > max_bytes:
             raise ConfigError("Configuration is too large")
-        return json.load(stream)
+        try:
+            data = json.load(stream)
+        except (ValueError, UnicodeError):
+            raise ConfigError("Invalid configuration JSON") from None
+        if not isinstance(data, dict):
+            raise ConfigError("Configuration must be a JSON object")
+        return data
 
 
 def write_routing(path, input_uid, output_uid):
