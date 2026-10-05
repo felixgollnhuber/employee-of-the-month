@@ -16,7 +16,7 @@ Historical calls, the most recent operation and title similarity cannot select a
 
 ## Delivery semantics
 
-Before dispatch, the service reads the T3 shell and target snapshot, verifies project and thread identity, checks open questions and persists the exact `thread.turn.start` command with stable command and message IDs.
+Before dispatch, the service reads the T3 shell and target snapshot, verifies project and thread identity, checks open questions and persists the exact bridge-side `thread.turn.start` command with stable command and message IDs. The V2 adapter sends it as `message.dispatch`, preserving both IDs and rechecking current questions and thread modes before the command RPC.
 
 After an ambiguous transport result, it reads back the same message ID. It does not resend automatically. A matching message proves receipt by the thread, not successful domain work or a completed provider turn.
 

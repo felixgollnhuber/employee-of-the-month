@@ -1,4 +1,4 @@
-"""T3 HTTP integration. All mutations use T3 commands, never its SQLite files."""
+"""Versioned T3 HTTP reads and WebSocket commands, never direct SQLite access."""
 import json
 import os
 import re
@@ -16,6 +16,8 @@ from .config import read_private_json
 from .control import GateError
 from .handoff import Handoff, prepare_handoff, prepare_answer, pending_requests
 from .i18n import Locale
+from .t3_protocol import (PROTOCOL_HEADER, SHELL_LIMIT, THREAD_LIMIT, BOUNDED_THREAD_LIMIT,
+                          shell_snapshot, thread_snapshot, command_v2)
 
 
 def now(): return datetime.now(timezone.utc).isoformat()
@@ -105,7 +107,7 @@ def validate_connection_files(origin, credentials_file, *, include_token=False):
 
 
 class T3Client:
-    def __init__(self, origin, token, *, opener=None):
+    def __init__(self, origin, token, *, opener=None, connector=None):
         if not isinstance(origin, str):
             raise GateError("invalid_t3_origin")
         parsed = urllib.parse.urlsplit(origin)
@@ -117,6 +119,8 @@ class T3Client:
             raise GateError("invalid_t3_connection")
         self.origin, self.token = origin.rstrip("/"), token
         self.opener = opener or urllib.request.build_opener(NoRedirect())
+        self.connector = connector
+        self.protocol = None
 
     @classmethod
     def from_profile(cls, profile):
@@ -126,53 +130,112 @@ class T3Client:
         return cls(validated["origin"], token)
 
     def request(self, path, body=None):
+        result = self._request_json(path, body)
+        if path == "/api/orchestration/shell" and body is None:
+            version = 2 if "schemaVersion" in result else 1
+            if version == 2:
+                normalized = shell_snapshot(result)
+                self._remember_protocol(version)
+                return normalized
+            if not isinstance(result.get("projects"), list) or not isinstance(result.get("threads"), list):
+                raise GateError("t3_invalid_shell_snapshot")
+            self._remember_protocol(version)
+        return result
+
+    def _remember_protocol(self, version):
+        if self.protocol is not None and self.protocol != version:
+            raise GateError("t3_protocol_changed")
+        self.protocol = version
+
+    def _request_json(self, path, body=None):
+        limit = (SHELL_LIMIT if path == "/api/orchestration/shell" else
+                 BOUNDED_THREAD_LIMIT if path.startswith("/api/orchestration/threads/") and path.endswith("/bounded") else THREAD_LIMIT)
         request = urllib.request.Request(self.origin + path,
             data=None if body is None else json.dumps(body, ensure_ascii=False).encode(),
-            headers={"Authorization":"Bearer " + self.token, "Content-Type":"application/json"})
+            headers={"Authorization":"Bearer " + self.token, "Content-Type":"application/json",
+                     PROTOCOL_HEADER: "2", "Accept": "application/json"})
         try:
             with self.opener.open(request, timeout=8) as response:
-                data = response.read(4*1024*1024 + 1)
-            if len(data) > 4*1024*1024: raise GateError("t3_response_too_large")
-            return json.loads(data)
+                headers = getattr(response, "headers", None)
+                if headers is not None and headers.get("Content-Type", "").split(";", 1)[0].strip().lower() != "application/json":
+                    raise GateError("t3_non_json_response")
+                data = response.read(limit + 1)
+            if len(data) > limit: raise GateError("t3_response_too_large")
+            result = json.loads(data)
+            if not isinstance(result, dict): raise GateError("t3_invalid_response")
+            return result
         except urllib.error.HTTPError as error:
             raise GateError("t3_http_" + str(error.code)) from None
         except (urllib.error.URLError, TimeoutError, OSError, ValueError):
             raise GateError("t3_connection_or_response_failed") from None
 
     def snapshot(self, thread_id):
-        if not isinstance(thread_id, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}",thread_id):
+        if not isinstance(thread_id, str) or not re.fullmatch(r"[A-Za-z0-9_-][A-Za-z0-9_.:%-]{0,255}", thread_id):
             raise GateError("invalid_t3_thread_id")
-        result = self.request("/api/orchestration/threads/" + thread_id)
+        path = "/api/orchestration/threads/" + urllib.parse.quote(thread_id, safe="")
+        if self.protocol == 2:
+            path += "/bounded"
+        try:
+            result = self.request(path)
+        except GateError as error:
+            if str(error) != "t3_response_too_large" or self.protocol == 1 or path.endswith("/bounded"):
+                raise
+            result = self.request(path + "/bounded")
+        if "projection" in result:
+            normalized = thread_snapshot(result, thread_id)
+            self._remember_protocol(2)
+            return normalized
+        self._remember_protocol(1)
         if result.get("thread",{}).get("id") != thread_id: raise GateError("t3_snapshot_mismatch")
         return result
 
     def dispatch(self, command):
-        result = self.request("/api/orchestration/dispatch", command)
-        if type(result.get("sequence")) is not int: raise GateError("t3_dispatch_unconfirmed")
+        if not isinstance(command, dict):
+            raise GateError("t3_invalid_command")
+        if self.protocol is None:
+            self.request("/api/orchestration/shell")
+        if self.protocol == 2:
+            source = self.snapshot(command["threadId"])["thread"] if command.get("type") == "thread.turn.start" else None
+            try:
+                translated = command_v2(command, source)
+            except (KeyError, TypeError, ValueError):
+                raise GateError("t3_invalid_command") from None
+            result = self._rpc("orchestration.dispatchCommand", translated, error_code="t3_dispatch_unconfirmed")
+        else:
+            result = self.request("/api/orchestration/dispatch", command)
+        if not isinstance(result, dict) or type(result.get("sequence")) is not int:
+            raise GateError("t3_dispatch_unconfirmed")
         return result
 
     def rpc(self, method, payload=None):
         """Read T3's authenticated provider catalog using its Effect RPC envelope."""
         if method not in ('server.getConfig', 'server.refreshProviders'):
             raise GateError('unsupported_t3_metadata_method')
-        from websockets.sync.client import connect
+        return self._rpc(method, payload or {}, error_code="t3_metadata_unavailable")
+
+    def _rpc(self, method, payload, *, error_code):
+        if self.connector is None:
+            from websockets.sync.client import connect
+            connector = connect
+        else:
+            connector = self.connector
         tag = uuid.uuid4().hex
         try:
-            with connect(self.origin.replace('http', 'ws', 1) + '/ws',
-                         additional_headers={'Authorization': 'Bearer ' + self.token},
+            with connector(self.origin.replace('http', 'ws', 1) + '/ws?orchestrationProtocol=2',
+                         additional_headers={'Authorization': 'Bearer ' + self.token, PROTOCOL_HEADER: "2"},
                          open_timeout=8, close_timeout=2, max_size=8*1024*1024) as ws:
                 ws.send(json.dumps({'_tag': 'Request', 'id': tag, 'tag': method,
-                                    'payload': payload or {}, 'headers': []}))
+                                    'payload': payload, 'headers': []}))
                 deadline = time.monotonic() + 15
                 while time.monotonic() < deadline:
                     event = json.loads(ws.recv(timeout=max(.1, deadline-time.monotonic())))
                     if event.get('requestId') != tag: continue
                     result = event.get('exit', {})
-                    if result.get('_tag') != 'Success': raise GateError('t3_metadata_request_failed')
+                    if result.get('_tag') != 'Success': raise GateError(error_code)
                     return result['value']
         except Exception:
-            raise GateError('t3_metadata_unavailable') from None
-        raise GateError('t3_metadata_timeout')
+            raise GateError(error_code) from None
+        raise GateError(error_code)
 
     def create_coordinator(self, source, *, title=COORDINATOR_TITLE, interaction_mode="default"):
         identifier = str(uuid.uuid4())
@@ -230,7 +293,11 @@ class T3Client:
         while time.monotonic() < deadline and not cancelled():
             activities = self.snapshot(handoff.thread_id)["thread"].get("activities",[])
             relevant = [a for a in activities if (a.get("payload") or {}).get("requestId")==handoff.request_id]
-            if any(a.get("kind")=="user-input.resolved" for a in relevant): return True
+            resolved = next((a for a in relevant if a.get("kind") == "user-input.resolved"), None)
+            if resolved:
+                if self.protocol == 2 and resolved["payload"].get("answers") != answers:
+                    raise GateError("t3_answer_readback_mismatch")
+                return True
             if any(a.get("kind")=="provider.user-input.respond.failed" for a in relevant):
                 raise GateError("t3_answer_rejected")
             time.sleep(0.2)

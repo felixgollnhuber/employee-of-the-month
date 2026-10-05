@@ -5,17 +5,19 @@ T3 owns work threads and provider sessions. Employee of the Month reads bounded 
 ## Read path
 
 - `GET /api/orchestration/shell` supplies projects and thread summaries.
-- `GET /api/orchestration/threads/:threadId` supplies one full snapshot.
+- `GET /api/orchestration/threads/:threadId/bounded` supplies a V2 control-plane projection with bounded recent history.
 - T3 RPC supplies the configured provider catalog and reported usage windows.
 
 ## Write path
 
-- `thread.user-input.respond` answers one exact open structured request.
-- `thread.turn.start` sends a normal follow-up or begins confirmed work.
+- `runtime-request.respond` answers one exact open structured request.
+- `message.dispatch` sends a normal follow-up or begins confirmed work.
 - `thread.create` creates a confirmed voice task before its first turn starts.
 - `thread.settle` removes completed technical coordination threads from the active view.
 
 Every mutation has a stable command ID and is persisted before dispatch. The service reads the target back before it reports success.
+
+V2 reads carry the required protocol header and V2 commands use authenticated WebSocket RPC. The adapter retains the durable bridge-side command representation so existing ledgers do not need to be rewritten. See [t3-protocol.md](t3-protocol.md).
 
 ## Question handoff
 

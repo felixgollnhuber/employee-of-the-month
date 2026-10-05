@@ -18,7 +18,7 @@ Python service  <---->  OpenAI GPT-Live 1
         |
         +------------>  OpenAI Responses API for small JSON structuring requests
         |
-        +------------>  T3 Code orchestration HTTP API
+        +------------>  T3 Code HTTP reads and WebSocket command RPC
                               |
                               +----> Codex, Claude or another configured provider
 ```
@@ -52,6 +52,12 @@ Every operation that could be duplicated is assigned stable IDs and persisted be
 - task thread creation and first-turn commands.
 
 After a timeout or crash, the service first reads back the same target and ID. It does not blindly send again. This is duplicate prevention, not a guarantee that every ambiguous transport outcome can be recovered.
+
+## T3 protocol compatibility
+
+Current T3 builds require orchestration protocol V2. HTTP reads include `x-t3-orchestration-protocol: 2`; commands use the authenticated WebSocket RPC `orchestration.dispatchCommand`. The adapter translates V2 runs, runtime requests and message identities into the bridge's existing conversation contract. Stable command, message, thread and request IDs remain unchanged.
+
+Shell responses are capped at 8 MiB. V2 thread reads use the server's bounded snapshot endpoint with an 8 MiB cap; legacy and unbounded reads retain the 4 MiB cap. HTML responses, unknown versions and ambiguous question identities are rejected. A resolved V2 request confirms delivery only when its recorded answers match the submitted answers. See [t3-protocol.md](t3-protocol.md) for the compatibility and validation boundaries.
 
 ## Safety model
 

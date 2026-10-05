@@ -62,8 +62,8 @@ Employee of the Month closes that gap. It watches your T3 Code projects. When a 
 └──────────────┘                 │ TDLib + tgcalls media runtime │  delegation   └──────────────┘
                                  │ conversation + safety logic   │
                                  └───────────────┬───────────────┘
-                                                 │ HTTP API: read threads, answer
-                                                 │ questions, send messages, create threads
+                                                 │ HTTP reads and WebSocket commands:
+                                                 │ questions, messages and new threads
                                                  ▼
                                  ┌───────────────────────────────┐
                                  │ T3 Code                       │

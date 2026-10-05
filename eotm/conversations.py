@@ -247,6 +247,8 @@ class Conversations:
 
     def recover(self):
         for operation in list(self.data['operations'].values()):
+            if operation['status'] in ('completed', 'stale'):
+                continue
             if operation['attempt'] and operation['first_message'] is None:
                 self.finish_attempt(operation['id'], {'phase': 'interrupted', 'reason': 'service_restart'})
 
